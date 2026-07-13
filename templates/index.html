@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<!-- templates/index.html – AutoCaption upload + caption editor -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoCaption</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+    h1 { font-size: 1.75rem; margin-bottom: 1.5rem; color: #f8fafc; }
+    /* --- Upload step ------------------------------------------------------ */
+    #upload-step { max-width: 520px; }
+    #upload-step label { display: block; margin-bottom: 0.4rem; font-weight: 600; }
+    #upload-step input[type="file"],
+    #upload-step input[type="number"],
+    #upload-step select { width: 100%; padding: 0.6rem; margin-bottom: 1rem; border-radius: 6px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; font-size: 0.95rem; }
+    #upload-step input[type="number"] { max-width: 100px; }
+    .btn { display: inline-block; padding: 0.65rem 1.5rem; border: none; border-radius: 6px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+    .btn:hover { opacity: .85; }
+    .btn-primary { background: #3b82f6; color: #fff; }
+    .btn-success { background: #22c55e; color: #fff; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    /* --- Status bar ------------------------------------------------------- */
+    #status-bar { margin: 1rem 0; padding: 0.75rem 1rem; border-radius: 6px; font-weight: 500; }
+    .status-info { background: #1e3a5f; color: #93c5fd; }
+    .status-error { background: #450a0a; color: #fca5a5; }
+    /* --- Editor step ------------------------------------------------------ */
+    #editor-step { display: none; }
+    .editor-layout { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+    .video-pane { flex: 1 1 480px; min-width: 0; }
+    .video-pane video { width: 100%; border-radius: 8px; background: #000; }
+    .captions-pane { flex: 1 1 400px; min-width: 0; max-height: 80vh; overflow-y: auto; }
+    .caption-chunk { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.5rem; cursor: pointer; transition: border-color .15s; }
+    .caption-chunk:hover { border-color: #475569; }
+    .caption-chunk.active { border-color: #3b82f6; background: #1e3a5f; }
+    .chunk-time { font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem; }
+    .chunk-input { width: 100%; padding: 0.4rem 0.5rem; border-radius: 4px; border: 1px solid #475569; background: #0f172a; color: #e2e8f0; font-size: 0.9rem; font-family: inherit; }
+    /* --- Spinner ---------------------------------------------------------- */
+    .spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin .6s linear infinite; margin-right: .4rem; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    /* --- Misc ------------------------------------------------------------- */
+    .hidden { display: none !important; }
+    a.download-link { color: #60a5fa; text-decoration: underline; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <h1>AutoCaption</h1>
+
+  <!-- ================================================================= -->
+  <!-- STEP 1: Upload form                                                -->
+  <!-- ================================================================= -->
+  <div id="upload-step">
+    <label for="video-file">Video file</label>
+    <input type="file" id="video-file" accept="video/*">
+
+    <label for="words-per-line">Words per line</label>
+    <input type="number" id="words-per-line" value="3" min="1" max="10">
+
+    <label for="caption-position">Caption position</label>
+    <select id="caption-position">
+      <option value="bottom">Bottom</option>
+      <option value="top">Top</option>
+    </select>
+
+    <label for="model-size">Whisper model size</label>
+    <select id="model-size">
+      <option value="tiny">Tiny (fastest)</option>
+      <option value="base">Base</option>
+      <option value="small" selected>Small</option>
+      <option value="medium">Medium (slow, accurate)</option>
+    </select>
+
+    <button class="btn btn-primary" id="upload-btn" onclick="uploadVideo()">Upload &amp; Transcribe</button>
+  </div>
+
+  <!-- Status bar -->
+  <div id="status-bar" class="hidden"></div>
+
+  <!-- ================================================================= -->
+  <!-- STEP 2: Caption editor                                             -->
+  <!-- ================================================================= -->
+  <div id="editor-step">
+    <div class="editor-layout">
+      <div class="video-pane">
+        <video id="video-player" controls></video>
+      </div>
+      <div class="captions-pane" id="captions-list"></div>
+    </div>
+    <div style="margin-top:1.5rem;">
+      <button class="btn btn-success" id="save-render-btn" onclick="saveAndRender()">Save &amp; Render</button>
+      <span id="render-spinner" class="hidden"><span class="spinner"></span> Rendering video&hellip;</span>
+    </div>
+    <div id="download-area" class="hidden" style="margin-top:1rem;">
+      <a class="download-link" id="download-link" href="#">Download captioned video</a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ===================================================================== */
+/* State                                                                 */
+/* ===================================================================== */
+let JOB_ID = null;
+let CAPTION_DATA = [];
+let POLL_TIMER = null;
+
+/* DOM refs */
+const UP_STEP    = document.getElementById('upload-step');
+const ED_STEP    = document.getElementById('editor-step');
+const STATUS_BAR = document.getElementById('status-bar');
+const VIDEO_EL   = document.getElementById('video-player');
+const CAPS_LIST  = document.getElementById('captions-list');
+
+/* ===================================================================== */
+/* Step 1: Upload                                                        */
+/* ===================================================================== */
+async function uploadVideo() {
+  const file = document.getElementById('video-file').files[0];
+  if (!file) return alert('Please select a video file.');
+
+  const form = new FormData();
+  form.append('input_video', file);
+  form.append('words_per_line', document.getElementById('words-per-line').value);
+  form.append('caption_position', document.getElementById('caption-position').value);
+  form.append('whisper_model_size', document.getElementById('model-size').value);
+
+  showStatus('Uploading and queueing transcription&hellip;', 'info');
+  const btn = document.getElementById('upload-btn');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/jobs/', { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || JSON.stringify(err));
+    }
+    const data = await res.json();
+    JOB_ID = data.id;
+    showStatus('Transcribing&hellip; please wait.', 'info');
+    POLL_TIMER = setInterval(pollJob, 1500);
+  } catch (err) {
+    showStatus('Upload failed: ' + err.message, 'error');
+    btn.disabled = false;
+  }
+}
+
+/* ===================================================================== */
+/* Poll job status                                                       */
+/* ===================================================================== */
+async function pollJob() {
+  try {
+    const res = await fetch(`/api/jobs/${JOB_ID}/`);
+    if (!res.ok) throw new Error('Failed to fetch job');
+    const job = await res.json();
+
+    if (job.status === 'ready_for_review') {
+      clearInterval(POLL_TIMER);
+      showStatus('Ready for review &mdash; edit captions below, then save &amp; render.', 'info');
+      showEditor(job);
+      return;
+    }
+    if (job.status === 'failed') {
+      clearInterval(POLL_TIMER);
+      showStatus('Transcription failed: ' + (job.error_message || 'Unknown error'), 'error');
+      document.getElementById('upload-btn').disabled = false;
+      return;
+    }
+    if (job.status === 'transcribing' || job.status === 'pending') {
+      showStatus('Transcribing&hellip; (' + job.status + ')', 'info');
+    }
+  } catch (err) {
+    clearInterval(POLL_TIMER);
+    showStatus('Lost connection while polling: ' + err.message, 'error');
+  }
+}
+
+/* ===================================================================== */
+/* Step 2: Caption editor                                                */
+/* ===================================================================== */
+function showEditor(job) {
+  UP_STEP.style.display = 'none';
+  ED_STEP.style.display = 'block';
+
+  CAPTION_DATA = job.caption_data || [];
+  VIDEO_EL.src = job.input_video;
+
+  renderCaptionChunks();
+}
+
+function renderCaptionChunks() {
+  CAPS_LIST.innerHTML = '';
+
+  CAPTION_DATA.forEach((chunk, idx) => {
+    const div = document.createElement('div');
+    div.className = 'caption-chunk';
+    div.setAttribute('data-index', idx);
+
+    const time = document.createElement('div');
+    time.className = 'chunk-time';
+    time.textContent = formatTime(chunk.start) + ' \u2192 ' + formatTime(chunk.end);
+
+    const input = document.createElement('input');
+    input.className = 'chunk-input';
+    input.value = chunk.text;
+    input.addEventListener('input', (e) => {
+      CAPTION_DATA[idx].text = e.target.value;
+    });
+
+    div.appendChild(time);
+    div.appendChild(input);
+    div.addEventListener('click', () => seekTo(chunk.start));
+
+    CAPS_LIST.appendChild(div);
+  });
+
+  // Highlight active chunk as video plays
+  VIDEO_EL.ontimeupdate = () => {
+    const t = VIDEO_EL.currentTime;
+    let activeIdx = -1;
+    for (let i = 0; i < CAPTION_DATA.length; i++) {
+      if (t >= CAPTION_DATA[i].start && t <= CAPTION_DATA[i].end) {
+        activeIdx = i;
+        break;
+      }
+    }
+    document.querySelectorAll('.caption-chunk').forEach((el, i) => {
+      el.classList.toggle('active', i === activeIdx);
+    });
+    // Auto-scroll active chunk into view
+    if (activeIdx >= 0) {
+      const el = CAPS_LIST.querySelector(`[data-index="${activeIdx}"]`);
+      if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  };
+}
+
+function seekTo(seconds) {
+  VIDEO_EL.currentTime = seconds;
+  VIDEO_EL.play().catch(() => {}); // autoplay may be blocked – that's ok
+}
+
+/* ===================================================================== */
+/* Save & Render                                                         */
+/* ===================================================================== */
+async function saveAndRender() {
+  const btn = document.getElementById('save-render-btn');
+  btn.disabled = true;
+  document.getElementById('render-spinner').classList.remove('hidden');
+
+  try {
+    // PATCH edited captions
+    let res = await fetch(`/api/jobs/${JOB_ID}/captions/`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caption_data: CAPTION_DATA }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || JSON.stringify(err));
+    }
+
+    // POST render
+    res = await fetch(`/api/jobs/${JOB_ID}/render/`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || JSON.stringify(err));
+    }
+
+    showStatus('Rendering video&hellip;', 'info');
+    POLL_TIMER = setInterval(pollRender, 2000);
+  } catch (err) {
+    showStatus('Save/Render failed: ' + err.message, 'error');
+    btn.disabled = false;
+    document.getElementById('render-spinner').classList.add('hidden');
+  }
+}
+
+async function pollRender() {
+  try {
+    const res = await fetch(`/api/jobs/${JOB_ID}/`);
+    const job = await res.json();
+
+    if (job.status === 'done') {
+      clearInterval(POLL_TIMER);
+      document.getElementById('render-spinner').classList.add('hidden');
+      showStatus('Rendering complete!', 'info');
+      const area = document.getElementById('download-area');
+      const link = document.getElementById('download-link');
+      area.classList.remove('hidden');
+      link.href = `/api/jobs/${JOB_ID}/download/`;
+      return;
+    }
+    if (job.status === 'failed') {
+      clearInterval(POLL_TIMER);
+      showStatus('Rendering failed: ' + (job.error_message || 'Unknown error'), 'error');
+      document.getElementById('save-render-btn').disabled = false;
+      document.getElementById('render-spinner').classList.add('hidden');
+      return;
+    }
+    showStatus('Rendering&hellip;', 'info');
+  } catch (err) {
+    clearInterval(POLL_TIMER);
+    showStatus('Lost connection: ' + err.message, 'error');
+  }
+}
+
+/* ===================================================================== */
+/* Helpers                                                               */
+/* ===================================================================== */
+function showStatus(msg, cssClass) {
+  STATUS_BAR.innerHTML = msg;
+  STATUS_BAR.className = 'status-' + cssClass;
+  STATUS_BAR.classList.remove('hidden');
+}
+
+function formatTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = String(Math.floor(sec % 60)).padStart(2, '0');
+  const ms = String(Math.floor((sec % 1) * 100)).padStart(2, '0');
+  return m + ':' + s + '.' + ms;
+}
+</script>
+</body>
+</html>

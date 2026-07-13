@@ -1,0 +1,6 @@
+{
+  "name": "Oniex Pro Editor",
+  "description": "Premium desktop video editor with multi-track timeline, interactive transform bounding controls, parametric equalizer visualizer, real-time LUT color grades, machine-learning AI captions transcribing, and a keyboard-first command palette.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

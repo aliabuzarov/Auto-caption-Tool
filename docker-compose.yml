@@ -1,0 +1,96 @@
+# docker-compose.yml
+# ===========================================================================
+# AutoCaption – full stack with a single command:
+#   docker compose up --build
+#
+# Services:
+#   redis   – Celery broker & result backend
+#   db      – PostgreSQL 16 (data persisted in a named volume)
+#   web     – Django runserver (runs migrations on start, live-code mounts)
+#   worker  – Celery worker (shares the same app code + media volume as web)
+# ===========================================================================
+
+version: "3.9"
+
+services:
+  # -----------------------------------------------------------------------
+  # Redis – lightweight message broker for Celery.
+  # -----------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  # -----------------------------------------------------------------------
+  # PostgreSQL – persistent relational database.
+  # -----------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: autocaption
+      POSTGRES_USER: autocaption
+      POSTGRES_PASSWORD: autocaption
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autocaption -d autocaption"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  # -----------------------------------------------------------------------
+  # Django web server – runs migrations then starts runserver on :8001.
+  # -----------------------------------------------------------------------
+  web:
+    build: .
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8001"
+    ports:
+      - "8001:8001"
+    volumes:
+      - .:/app                # live-code editing during development
+      - media_volume:/app/media  # shared uploaded + rendered video storage
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DATABASE_URL: postgres://autocaption:autocaption@db:5432/autocaption
+      DJANGO_SECRET_KEY: docker-compose-insecure-dev-key
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+
+  # -----------------------------------------------------------------------
+  # Celery worker – transcribes and renders video asynchronously.
+  # Shares the same code mount and media volume as the web service so both
+  # processes see the same uploaded input and rendered output files.
+  # -----------------------------------------------------------------------
+  worker:
+    build: .
+    command: celery -A autocaption worker --loglevel=info --concurrency=2
+    volumes:
+      - .:/app
+      - media_volume:/app/media
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DATABASE_URL: postgres://autocaption:autocaption@db:5432/autocaption
+      DJANGO_SECRET_KEY: docker-compose-insecure-dev-key
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+
+# ---------------------------------------------------------------------------
+# Named volumes – persist across `docker compose down` / `up` cycles.
+# Use `docker compose down -v` for a fully clean reset.
+# ---------------------------------------------------------------------------
+volumes:
+  postgres_data:
+  media_volume:
