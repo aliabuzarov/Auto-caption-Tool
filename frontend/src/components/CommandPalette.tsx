@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Play, Scissors, Bookmark, Sparkles, Cpu, RefreshCw, Type, Music } from 'lucide-react';
+import { Search, Play, Scissors, Bookmark, Sparkles, RefreshCw, Type } from 'lucide-react';
 
 interface CommandItem {
   id: string;
@@ -22,7 +22,6 @@ interface CommandPaletteProps {
   onSplitClip: () => void;
   onAddMarker: () => void;
   onRunAICaptions: () => void;
-  onTriggerUpscale: () => void;
   onResetTransform: () => void;
   onAddTextClip: (title: string) => void;
 }
@@ -34,7 +33,6 @@ export default function CommandPalette({
   onSplitClip,
   onAddMarker,
   onRunAICaptions,
-  onTriggerUpscale,
   onResetTransform,
   onAddTextClip
 }: CommandPaletteProps) {
@@ -47,19 +45,16 @@ export default function CommandPalette({
     { id: 'split', name: 'Split Clip at Playhead', shortcut: 'S', category: 'Editing', icon: Scissors, action: onSplitClip },
     { id: 'marker', name: 'Add Timeline Marker', shortcut: 'M', category: 'Editing', icon: Bookmark, action: onAddMarker },
     { id: 'captions', name: 'Generate AI Audio Captions', shortcut: 'C', category: 'AI Tools', icon: Sparkles, action: onRunAICaptions },
-    { id: 'upscale', name: 'Run Neural AI 4K Upscale', shortcut: 'U', category: 'AI Tools', icon: Cpu, action: onTriggerUpscale },
     { id: 'reset', name: 'Reset Coordinates Transform', shortcut: 'R', category: 'Workspace', icon: RefreshCw, action: onResetTransform },
-    { id: 'add-title', name: 'Add "Main Title Fast" Preset', shortcut: 'T', category: 'Text', icon: Type, action: () => onAddTextClip('Main Title Fast') },
-    { id: 'add-sub', name: 'Add "Subtitles" Text Overlay', shortcut: 'Shift+T', category: 'Text', icon: Type, action: () => onAddTextClip('Subtitles') },
+    { id: 'add-title', name: 'Add "Main Title" Text', shortcut: 'T', category: 'Text', icon: Type, action: () => onAddTextClip('Main Title') },
+    { id: 'add-sub', name: 'Add "Subtitles" Text', shortcut: 'Shift+T', category: 'Text', icon: Type, action: () => onAddTextClip('Subtitles') },
   ];
 
-  // Filter commands by search query
   const filteredCommands = commands.filter((cmd) =>
     cmd.name.toLowerCase().includes(query.toLowerCase()) ||
     cmd.category.toLowerCase().includes(query.toLowerCase())
   );
 
-  // Focus input when opened
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => inputRef.current?.focus(), 50);
@@ -67,11 +62,9 @@ export default function CommandPalette({
     }
   }, [isOpen]);
 
-  // Key handlers inside palette
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
-
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
@@ -89,7 +82,6 @@ export default function CommandPalette({
         }
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, filteredCommands, selectedIndex, onClose]);
@@ -98,12 +90,8 @@ export default function CommandPalette({
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-start justify-center pt-24 px-4 select-none animate-[fadeIn_0.15s_ease-out]">
-      {/* Backdrop closer click */}
       <div className="absolute inset-0 cursor-default" onClick={onClose} />
-
-      {/* Floating Raycast-Style Box */}
       <div className="bg-surface border border-white/[0.08] w-full max-w-lg rounded-2xl overflow-hidden shadow-[0_30px_60px_rgba(0,0,0,0.85)] z-10 flex flex-col max-h-[380px]">
-        {/* Search Input Bar */}
         <div className="flex items-center px-4 py-3 border-b border-white/[0.04] gap-3 bg-surface-container-lowest shrink-0">
           <Search className="w-4 h-4 text-on-surface-variant/70" />
           <input
@@ -125,13 +113,11 @@ export default function CommandPalette({
           </button>
         </div>
 
-        {/* Action Commands list */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
           {filteredCommands.length > 0 ? (
             filteredCommands.map((cmd, idx) => {
               const isSelected = idx === selectedIndex;
               const Icon = cmd.icon;
-
               return (
                 <div
                   key={cmd.id}
@@ -161,8 +147,6 @@ export default function CommandPalette({
                       </p>
                     </div>
                   </div>
-
-                  {/* Hotkey tag */}
                   <span className={`px-2 py-0.5 rounded text-[8.5px] font-mono tracking-wider ${
                     isSelected ? 'bg-primary/20 text-primary border border-primary/25' : 'bg-white/[0.03] border border-white/[0.05] text-on-surface-variant/60'
                   }`}>
@@ -178,9 +162,8 @@ export default function CommandPalette({
           )}
         </div>
 
-        {/* Palette Footer hint */}
         <div className="px-4 py-2 border-t border-white/[0.03] bg-surface-container-lowest flex justify-between items-center text-[8px] font-mono text-on-surface-variant/45 uppercase tracking-widest shrink-0">
-          <span>Use ↑↓ keys to navigate</span>
+          <span>Use arrow keys to navigate</span>
           <span>Press Enter to select</span>
         </div>
       </div>

@@ -3,14 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   Volume2,
   VolumeX,
   Lock,
   Unlock,
-  Eye,
-  EyeOff,
   Music,
   Film,
   Type,
@@ -18,10 +16,8 @@ import {
   Grid,
   ZoomIn,
   ZoomOut,
-  Trash2,
   ChevronLeft,
   ChevronRight,
-  Plus
 } from 'lucide-react';
 import { Track, Clip } from '../types';
 
@@ -31,15 +27,16 @@ interface TimelineProps {
   clips: Clip[];
   selectedClipId: string | null;
   onSelectClip: (clipId: string) => void;
-  currentTime: number; // in seconds
+  currentTime: number;
   onSeek: (time: number) => void;
   onUpdateClip: (clipId: string, updatedFields: Partial<Clip>) => void;
-  zoom: number; // visual percentage e.g. 100
+  zoom: number;
   setZoom: (z: number) => void;
   markers: number[];
   snapToGrid: boolean;
   onToggleSnap: () => void;
   onDeleteClip: (clipId: string) => void;
+  totalDuration: number;
 }
 
 export default function Timeline({
@@ -56,18 +53,16 @@ export default function Timeline({
   markers,
   snapToGrid,
   onToggleSnap,
-  onDeleteClip
+  onDeleteClip,
+  totalDuration,
 }: TimelineProps) {
   const rulerRef = useRef<HTMLDivElement>(null);
-  const totalDuration = 300; // 5 minutes sequence
 
-  // Horizontal position conversion
-  // Given time in seconds, return percentage based on current zoom
   const timeToPercent = (time: number) => {
+    if (totalDuration <= 0) return 0;
     return (time / totalDuration) * 100;
   };
 
-  // Click on time-ruler or tracks to seek playhead
   const handleRulerClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!rulerRef.current) return;
     const rect = rulerRef.current.getBoundingClientRect();
@@ -75,29 +70,25 @@ export default function Timeline({
     const percent = Math.max(0, Math.min(100, (clickX / rect.width) * 100));
     let time = (percent / 100) * totalDuration;
 
-    // Apply snapping to nearest 5 seconds if enabled
     if (snapToGrid) {
       time = Math.round(time / 5) * 5;
     }
-    
+
     onSeek(Math.max(0, Math.min(totalDuration, time)));
   };
 
-  // Format time display
   const formatMarkerTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // Move clip start back and forth
   const shiftClip = (clip: Clip, delta: number, e: React.MouseEvent) => {
     e.stopPropagation();
     const newStart = Math.max(0, Math.min(totalDuration - clip.duration, clip.start + delta));
     onUpdateClip(clip.id, { start: newStart });
   };
 
-  // Adjust clip duration (Trim)
   const trimClip = (clip: Clip, delta: number, e: React.MouseEvent) => {
     e.stopPropagation();
     const newDuration = Math.max(5, clip.duration + delta);
@@ -105,6 +96,56 @@ export default function Timeline({
       onUpdateClip(clip.id, { duration: newDuration });
     }
   };
+
+  // --- Mouse drag-to-resize on clip edges ---
+  const [dragEdge, setDragEdge] = useState<{ clipId: string; edge: 'left' | 'right'; initialMouseX: number; initialValue: number; clipStart: number; clipDuration: number } | null>(null);
+
+  const handleEdgeMouseDown = useCallback((clip: Clip, edge: 'left' | 'right', e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const initialValue = edge === 'left' ? clip.start : clip.duration;
+    setDragEdge({ clipId: clip.id, edge, initialMouseX: e.clientX, initialValue, clipStart: clip.start, clipDuration: clip.duration });
+    onSelectClip(clip.id);
+  }, [onSelectClip]);
+
+  useEffect(() => {
+    if (!dragEdge || !rulerRef.current) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const rect = rulerRef.current!.getBoundingClientRect();
+      const dx = e.clientX - dragEdge.initialMouseX;
+      const timeDelta = (dx / rect.width) * totalDuration;
+      const snapped = snapToGrid ? Math.round(timeDelta / 5) * 5 : Math.round(timeDelta * 10) / 10;
+
+      if (dragEdge.edge === 'left') {
+        const newStart = Math.max(0, Math.min(dragEdge.clipStart + dragEdge.clipDuration - 5, dragEdge.initialValue + snapped));
+        onUpdateClip(dragEdge.clipId, { start: newStart, duration: dragEdge.clipStart + dragEdge.clipDuration - newStart });
+      } else {
+        const newDuration = Math.max(5, Math.min(totalDuration - dragEdge.clipStart, dragEdge.initialValue + snapped));
+        onUpdateClip(dragEdge.clipId, { duration: newDuration });
+      }
+    };
+
+    const handleMouseUp = () => setDragEdge(null);
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragEdge, totalDuration, snapToGrid, onUpdateClip]);
+
+  // Generate tick marks dynamically based on totalDuration
+  const tickInterval = totalDuration <= 120 ? 10 : totalDuration <= 600 ? 30 : 60;
+  const tickMarks: number[] = [];
+  for (let t = 0; t <= totalDuration; t += tickInterval) {
+    tickMarks.push(t);
+  }
+  // Ensure the last mark is always included
+  if (tickMarks[tickMarks.length - 1] < totalDuration) {
+    tickMarks.push(Math.ceil(totalDuration / tickInterval) * tickInterval);
+  }
 
   return (
     <div className="bg-surface border border-white/[0.06] rounded-2xl flex flex-col h-64 overflow-hidden select-none shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
@@ -124,7 +165,6 @@ export default function Timeline({
             <span>Snap Grid</span>
           </button>
 
-          {/* Render markers badge */}
           {markers.length > 0 && (
             <div className="flex gap-1 items-center">
               <span className="w-1.5 h-1.5 rounded-full bg-secondary"></span>
@@ -161,47 +201,41 @@ export default function Timeline({
       <div className="flex-1 flex overflow-hidden">
         {/* Left Track controls headers column */}
         <div className="w-[140px] shrink-0 bg-surface-container-lowest border-r border-white/[0.04] flex flex-col pt-8">
-          {tracks.map((track) => {
-            const isVideo = track.type === 'video';
-            const isAudio = track.type === 'audio';
-            const isText = track.type === 'text';
-
-            return (
-              <div
-                key={track.id}
-                className="h-12 border-b border-white/[0.03] px-3 flex flex-col justify-center"
-              >
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-sans font-bold text-on-surface uppercase tracking-wide truncate max-w-[70px]">
-                    {track.name}
-                  </span>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={() => onToggleTrack(track.id, 'muted')}
-                      className={`p-1 rounded hover:bg-white/[0.04] transition-colors cursor-pointer ${
-                        track.muted ? 'text-tertiary' : 'text-on-surface-variant/40 hover:text-on-surface-variant'
-                      }`}
-                      title={track.muted ? 'Unmute track' : 'Mute track'}
-                    >
-                      {track.muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-                    </button>
-                    <button
-                      onClick={() => onToggleTrack(track.id, 'locked')}
-                      className={`p-1 rounded hover:bg-white/[0.04] transition-colors cursor-pointer ${
-                        track.locked ? 'text-primary' : 'text-on-surface-variant/40 hover:text-on-surface-variant'
-                      }`}
-                      title={track.locked ? 'Unlock track' : 'Lock track'}
-                    >
-                      {track.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
+          {tracks.map((track) => (
+            <div
+              key={track.id}
+              className="h-12 border-b border-white/[0.03] px-3 flex flex-col justify-center"
+            >
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-sans font-bold text-on-surface uppercase tracking-wide truncate max-w-[70px]">
+                  {track.name}
+                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => onToggleTrack(track.id, 'muted')}
+                    className={`p-1 rounded hover:bg-white/[0.04] transition-colors cursor-pointer ${
+                      track.muted ? 'text-tertiary' : 'text-on-surface-variant/40 hover:text-on-surface-variant'
+                    }`}
+                    title={track.muted ? 'Unmute track' : 'Mute track'}
+                  >
+                    {track.muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    onClick={() => onToggleTrack(track.id, 'locked')}
+                    className={`p-1 rounded hover:bg-white/[0.04] transition-colors cursor-pointer ${
+                      track.locked ? 'text-primary' : 'text-on-surface-variant/40 hover:text-on-surface-variant'
+                    }`}
+                    title={track.locked ? 'Unlock track' : 'Lock track'}
+                  >
+                    {track.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                  </button>
                 </div>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
 
-        {/* Right Scrollable timeline area (Ticks ruler + clips display) */}
+        {/* Right Scrollable timeline area */}
         <div className="flex-1 flex flex-col overflow-x-auto overflow-y-hidden relative group/scroller">
           {/* Timeline time ticks ruler */}
           <div
@@ -210,9 +244,8 @@ export default function Timeline({
             className="h-8 border-b border-white/[0.05] relative bg-surface-container/20 cursor-ew-resize select-none shrink-0"
             style={{ width: `${zoom}%`, minWidth: '100%' }}
           >
-            {/* Hour ticks rendering */}
             <div className="absolute inset-0 flex justify-between px-4 items-end pb-1.5 pointer-events-none">
-              {[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300].map((sec) => (
+              {tickMarks.map((sec) => (
                 <div key={sec} className="flex flex-col items-center">
                   <div className="w-px h-1.5 bg-white/20"></div>
                   <span className="text-[8px] font-mono text-on-surface-variant/60 tracking-wider mt-1">
@@ -222,7 +255,6 @@ export default function Timeline({
               ))}
             </div>
 
-            {/* Render placed markers */}
             {markers.map((sec, idx) => (
               <div
                 key={idx}
@@ -236,7 +268,6 @@ export default function Timeline({
               />
             ))}
 
-            {/* Playhead Overlay stem */}
             <div
               className="absolute top-0 bottom-0 w-px bg-primary z-30 pointer-events-none"
               style={{ left: `${timeToPercent(currentTime)}%` }}
@@ -251,14 +282,13 @@ export default function Timeline({
             className="flex-1 relative flex flex-col"
             style={{ width: `${zoom}%`, minWidth: '100%' }}
           >
-            {/* Grid ticks vertical background alignment */}
+            {/* Grid ticks vertical background */}
             <div className="absolute inset-0 flex justify-between px-4 pointer-events-none opacity-10">
-              {[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300].map((sec) => (
+              {tickMarks.map((sec) => (
                 <div key={sec} className="w-px h-full bg-white"></div>
               ))}
             </div>
 
-            {/* Lanes loop */}
             {tracks.map((track) => {
               const laneClips = clips.filter((c) => c.trackId === track.id);
               const isLocked = track.locked;
@@ -292,7 +322,6 @@ export default function Timeline({
                           width: `${clipWidth}%`,
                         }}
                       >
-                        {/* Clip Top: Icon, Label, Actions */}
                         <div className="flex items-center justify-between gap-1 w-full truncate pointer-events-none">
                           <div className="flex items-center gap-1.5 truncate">
                             {clip.type === 'video' && <Film className="w-3 h-3 text-secondary shrink-0" />}
@@ -303,26 +332,20 @@ export default function Timeline({
                               {clip.title}
                             </span>
                           </div>
-
-                          {/* Render visual tag */}
                           <span className="text-[7.5px] font-mono text-on-surface-variant/70 bg-black/45 px-1 py-0.5 rounded tracking-wide uppercase scale-90">
                             {clip.type === 'video' ? 'V1' : clip.type === 'audio' ? 'A1' : clip.type === 'text' ? 'T1' : 'FX'}
                           </span>
                         </div>
 
-                        {/* Interactive drag/trim overlay handles (only visible when selected) */}
                         {isSelected && !isLocked && (
                           <div className="absolute inset-0 flex justify-between pointer-events-none z-10">
-                            {/* Left Trim button */}
-                            <button
-                              onClick={(e) => trimClip(clip, -5, e)}
-                              className="pointer-events-auto w-4.5 h-full bg-black/60 border-r border-white/10 flex items-center justify-center hover:bg-primary hover:text-background-dark transition-all text-white"
-                              title="Trim Left -5s"
+                            <div
+                              onMouseDown={(e) => handleEdgeMouseDown(clip, 'left', e)}
+                              className="pointer-events-auto w-4.5 h-full bg-black/60 border-r border-white/10 flex items-center justify-center hover:bg-primary hover:text-background-dark transition-all text-white cursor-ew-resize group/trim"
+                              title="Drag to resize start"
                             >
                               <ChevronLeft className="w-3 h-3" />
-                            </button>
-
-                            {/* Center Shift Move buttons */}
+                            </div>
                             <div className="flex-1 flex justify-center gap-1 items-center pointer-events-auto">
                               <button
                                 onClick={(e) => shiftClip(clip, -5, e)}
@@ -342,19 +365,16 @@ export default function Timeline({
                                 <ChevronRight className="w-2.5 h-2.5" />
                               </button>
                             </div>
-
-                            {/* Right Trim button */}
-                            <button
-                              onClick={(e) => trimClip(clip, 5, e)}
-                              className="pointer-events-auto w-4.5 h-full bg-black/60 border-l border-white/10 flex items-center justify-center hover:bg-primary hover:text-background-dark transition-all text-white"
-                              title="Trim Right +5s"
+                            <div
+                              onMouseDown={(e) => handleEdgeMouseDown(clip, 'right', e)}
+                              className="pointer-events-auto w-4.5 h-full bg-black/60 border-l border-white/10 flex items-center justify-center hover:bg-primary hover:text-background-dark transition-all text-white cursor-ew-resize group/trim"
+                              title="Drag to resize duration"
                             >
                               <ChevronRight className="w-3 h-3" />
-                            </button>
+                            </div>
                           </div>
                         )}
 
-                        {/* Sound waveform simulation for audio clip */}
                         {clip.hasWaveform && !isSelected && (
                           <div className="flex gap-[1px] items-center h-4.5 opacity-30 px-3 w-full absolute bottom-1.5 left-0 right-0 pointer-events-none">
                             {[1,4,2,7,4,9,3,5,2,8,4,5,2,6,3,8,2,7,3,5,4,2,8,4,9,3,7,2,5].map((h, i) => (
@@ -367,12 +387,9 @@ export default function Timeline({
                           </div>
                         )}
 
-                        {/* Video thumbnail grid simulation for video clip */}
-                        {clip.type === 'video' && !isSelected && (
+                        {clip.type === 'video' && !isSelected && clip.thumbnailUrl && (
                           <div className="absolute inset-x-0 bottom-0 h-4.5 flex opacity-20 overflow-hidden rounded-b-md pointer-events-none">
-                            <img className="flex-1 object-cover h-full" src={clip.thumbnailUrl} alt="Thumbnail 1" />
-                            <img className="flex-1 object-cover h-full brightness-75 border-l border-white/10" src="https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=150" alt="Thumbnail 2" />
-                            <img className="flex-1 object-cover h-full brightness-50 border-l border-white/10" src="https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?q=80&w=150" alt="Thumbnail 3" />
+                            <img className="flex-1 object-cover h-full" src={clip.thumbnailUrl} alt="Thumbnail" />
                           </div>
                         )}
                       </div>

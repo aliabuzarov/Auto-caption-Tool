@@ -4,14 +4,14 @@
  */
 
 import React, { useState } from 'react';
-import { Film, Edit2, Check, Bell, Settings, Users, Share2, Play } from 'lucide-react';
+import { Film, Edit2, Check, Share2 } from 'lucide-react';
 
 interface HeaderProps {
   onExport: () => void;
 }
 
 export default function Header({ onExport }: HeaderProps) {
-  const [projectName, setProjectName] = useState('Oniex New Design');
+  const [projectName, setProjectName] = useState('AutoCaption Project');
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(projectName);
 
@@ -73,59 +73,19 @@ export default function Header({ onExport }: HeaderProps) {
             </h1>
           )}
           <p className="text-[10px] font-sans font-semibold tracking-wider text-on-surface-variant/70 uppercase mt-0.5">
-            Team Project <span className="text-primary/70 ml-1">• Saved</span>
+            Video Captioning Tool
           </p>
         </div>
       </div>
 
-      {/* Collaborators (Middle) */}
-      <div className="flex items-center gap-3">
-        <div className="flex -space-x-2">
-          <img
-            className="w-8 h-8 rounded-full border-2 border-surface object-cover"
-            alt="Sophia (Editor)"
-            referrerPolicy="no-referrer"
-            src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150&auto=format&fit=crop"
-          />
-          <img
-            className="w-8 h-8 rounded-full border-2 border-surface object-cover"
-            alt="Marcus (Director)"
-            referrerPolicy="no-referrer"
-            src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=150&auto=format&fit=crop"
-          />
-          <img
-            className="w-8 h-8 rounded-full border-2 border-surface object-cover"
-            alt="Elena (VFX Artist)"
-            referrerPolicy="no-referrer"
-            src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150&auto=format&fit=crop"
-          />
-        </div>
-        <div className="hidden sm:flex items-center justify-center px-2 py-1 rounded bg-surface-container border border-white/[0.06] text-[10px] font-sans text-on-surface font-semibold tracking-wider">
-          +12
-        </div>
-        <button className="hidden sm:flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-white/[0.06] text-[11px] font-sans font-semibold tracking-wide hover:bg-white/[0.04] transition-all cursor-pointer">
-          <Users className="w-3.5 h-3.5 text-on-surface-variant" />
-          <span>Join Room</span>
-        </button>
-      </div>
-
-      {/* Trailing Actions */}
-      <div className="flex items-center gap-3">
-        <button className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-white/[0.04] transition-colors relative cursor-pointer group">
-          <Bell className="w-4 h-4 group-hover:rotate-12 transition-transform" />
-          <span className="absolute top-2 right-2.5 w-1.5 h-1.5 bg-tertiary rounded-full"></span>
-        </button>
-        <button className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-white/[0.04] transition-colors cursor-pointer group">
-          <Settings className="w-4 h-4 group-hover:rotate-45 transition-transform duration-300" />
-        </button>
-        <button
-          onClick={onExport}
-          className="px-4.5 py-2 bg-primary text-background-dark rounded-xl text-[11px] font-sans font-semibold tracking-wider hover:bg-white transition-all cursor-pointer flex items-center gap-1.5 shadow-[0_0_15px_rgba(173,198,255,0.3)] hover:shadow-[0_0_20px_rgba(255,255,255,0.5)]"
-        >
-          <Share2 className="w-3.5 h-3.5" />
-          <span>Export</span>
-        </button>
-      </div>
+      {/* Export Button */}
+      <button
+        onClick={onExport}
+        className="px-4.5 py-2 bg-primary text-background-dark rounded-xl text-[11px] font-sans font-semibold tracking-wider hover:bg-white transition-all cursor-pointer flex items-center gap-1.5 shadow-[0_0_15px_rgba(173,198,255,0.3)] hover:shadow-[0_0_20px_rgba(255,255,255,0.5)]"
+      >
+        <Share2 className="w-3.5 h-3.5" />
+        <span>Export</span>
+      </button>
     </header>
   );
 }

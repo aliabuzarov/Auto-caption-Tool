@@ -15,6 +15,11 @@ export interface Clip {
   type: 'video' | 'audio' | 'text' | 'effect';
   text?: string;
   effectType?: string;
+  textColor?: string;
+  textBgColor?: string;
+  textFontSize?: number;
+  textBold?: boolean;
+  textShowBg?: boolean;
 }
 
 export interface Track {
@@ -28,7 +33,7 @@ export interface Track {
 
 export type SidebarTab = 'media' | 'import' | 'text' | 'audio' | 'effects' | 'ai-tools' | 'assets';
 
-export type InspectorTab = 'video' | 'audio' | 'effects';
+export type InspectorTab = 'video' | 'audio' | 'effects' | 'text';
 
 export interface VideoTransform {
   scale: number; // percentage (e.g. 124)

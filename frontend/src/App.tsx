@@ -33,9 +33,6 @@ import {
 } from './types';
 import {
   INITIAL_TRACKS,
-  INITIAL_CLIPS,
-  MEDIA_ITEMS,
-  MOCK_AUTO_CAPTIONS,
   LUT_PRESETS,
   MediaItem,
 } from './data';
@@ -57,21 +54,22 @@ import CommandPalette from './components/CommandPalette';
 
 export default function App() {
   // --- WORKSPACE CORE STATES ---
-  const [activeTab, setActiveTab] = useState<SidebarTab>('media');
+  const [activeTab, setActiveTab] = useState<SidebarTab>('import');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('video');
-  const [mediaList, setMediaList] = useState<MediaItem[]>(MEDIA_ITEMS);
+  const [mediaList, setMediaList] = useState<MediaItem[]>([]);
   const [tracks, setTracks] = useState<Track[]>(INITIAL_TRACKS);
-  const [clips, setClips] = useState<Clip[]>(INITIAL_CLIPS);
-  const [selectedClipId, setSelectedClipId] = useState<string | null>('clip-v1');
-  const [activeMedia, setActiveMedia] = useState<MediaItem>(MEDIA_ITEMS[0]);
+  const [clips, setClips] = useState<Clip[]>([]);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
 
   // --- PLAYBACK ENGINE STATES ---
-  const [currentTime, setCurrentTime] = useState<number>(130);
+  const [currentTime, setCurrentTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [videoDuration, setVideoDuration] = useState<number>(60); // updated when real video loads
 
   // --- INSPECTOR PARAMETER STATES ---
   const [transform, setTransform] = useState<VideoTransform>({
-    scale: 124, x: 0, y: 0, rotation: 0, opacity: 100,
+    scale: 100, x: 0, y: 0, rotation: 0, opacity: 100,
   });
   const [audioSettings, setAudioSettings] = useState<AudioSettings>({
     volume: 82, bass: 40, treble: 65, enhancedVoice: false,
@@ -82,17 +80,13 @@ export default function App() {
   });
 
   // --- MARKERS & SNAP ---
-  const [markers, setMarkers] = useState<number[]>([130, 210]);
+  const [markers, setMarkers] = useState<number[]>([]);
   const [snapToGrid, setSnapToGrid] = useState<boolean>(true);
 
   // --- AI PROCESS ENGINE STATES ---
   const [isGeneratingCaptions, setIsGeneratingCaptions] = useState<boolean>(false);
   const [hasCaptions, setHasCaptions] = useState<boolean>(false);
   const [activeCaptions, setActiveCaptions] = useState<Caption[]>([]);
-
-  const [isUpscaling, setIsUpscaling] = useState<boolean>(false);
-  const [upscaleProgress, setUpscaleProgress] = useState<number>(0);
-  const [isUpscaled, setIsUpscaled] = useState<boolean>(false);
 
   // --- BACKEND JOB FLOW ---
   const [userVideoFile, setUserVideoFile] = useState<File | null>(null);
@@ -126,32 +120,6 @@ export default function App() {
       if (exportPollTimerRef.current) clearInterval(exportPollTimerRef.current);
     };
   }, []);
-
-  // --- EFFECT: Playback Simulation Tick Loop (only when no real video) ---
-  useEffect(() => {
-    if (userVideoUrl) return; // don't simulate when real video is loaded
-    let interval: ReturnType<typeof setInterval>;
-    if (isPlaying) {
-      interval = setInterval(() => {
-        setCurrentTime((prev) => {
-          if (prev >= 300) { setIsPlaying(false); return 300; }
-          return prev + 1;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isPlaying, userVideoUrl]);
-
-  // --- SELECTION LINK ---
-  useEffect(() => {
-    if (selectedClipId) {
-      const activeClip = clips.find((c) => c.id === selectedClipId);
-      if (activeClip && activeClip.type === 'video') {
-        const matchMedia = mediaList.find((m) => m.title === activeClip.title);
-        if (matchMedia) setActiveMedia(matchMedia);
-      }
-    }
-  }, [selectedClipId, clips, mediaList]);
 
   // --- WORKSPACE HANDLERS ---
   const handleTogglePlay = useCallback(() => {
@@ -193,7 +161,8 @@ export default function App() {
     if (clip) {
       if (clip.type === 'video') setInspectorTab('video');
       else if (clip.type === 'audio') setInspectorTab('audio');
-      else if (clip.type === 'text' || clip.type === 'effect') setInspectorTab('effects');
+      else if (clip.type === 'text') setInspectorTab('text');
+      else if (clip.type === 'effect') setInspectorTab('effects');
     }
   }, [clips]);
 
@@ -243,7 +212,7 @@ export default function App() {
       trackId: isAudio ? 'audio' : 'video',
       title: item.title,
       start: currentTime,
-      duration: Math.min(item.durationSec, 45),
+      duration: Math.min(item.durationSec, videoDuration),
       color: isAudio ? 'from-purple-900/40 to-indigo-900/40 border-purple-500/30' : 'from-surface-container-high to-surface-container-highest',
       thumbnailUrl: item.thumbnailUrl,
       hasWaveform: isAudio,
@@ -252,7 +221,7 @@ export default function App() {
     setClips((prev) => [...prev, newClip]);
     setSelectedClipId(newClip.id);
     showToast(`Added "${item.title}" to active timeline track`);
-  }, [currentTime, showToast]);
+  }, [currentTime, videoDuration, showToast]);
 
   const handleSelectMediaForPlayer = useCallback((item: MediaItem) => {
     setActiveMedia(item);
@@ -265,6 +234,11 @@ export default function App() {
       start: currentTime, duration: 35,
       color: 'from-pink-950/40 to-rose-950/40 border-pink-500/30',
       type: 'text', text: title,
+      textColor: '#ffffff',
+      textBgColor: 'rgba(0,0,0,0.7)',
+      textFontSize: 20,
+      textBold: true,
+      textShowBg: true,
     };
     setClips((prev) => [...prev, newClip]);
     setSelectedClipId(newClip.id);
@@ -283,8 +257,21 @@ export default function App() {
     setUserVideoFile(file);
     const url = URL.createObjectURL(file);
     setUserVideoUrl(url);
+    setCurrentTime(0);
+    setHasCaptions(false);
+    setActiveCaptions([]);
+    setEditingCaptions(null);
+    setJobId(null);
+    setJobStatus(null);
     showToast(`Video "${file.name}" loaded for captioning`);
   }, [showToast]);
+
+  // =====================================================================
+  // Handle video metadata (duration) once the video element loads
+  // =====================================================================
+  const handleVideoLoaded = useCallback((duration: number) => {
+    setVideoDuration(duration);
+  }, []);
 
   // =====================================================================
   // REAL BACKEND FLOW: Upload video → transcribe → get captions.
@@ -377,32 +364,6 @@ export default function App() {
     );
   }, []);
 
-  const handleTriggerUpscale = useCallback(() => {
-    if (isUpscaling) return;
-    setIsUpscaling(true);
-    setUpscaleProgress(0);
-    showToast('AI model calculating high-frequency textures...');
-    const interval = setInterval(() => {
-      setUpscaleProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setIsUpscaling(false);
-          setIsUpscaled(true);
-          setMediaList((current) =>
-            current.map((media) =>
-              media.id === activeMedia.id
-                ? { ...media, resolution: '3840×2160 (4K Neural Ultra)' }
-                : media,
-            ),
-          );
-          showToast('Neural upscaler successfully generated high-res 4K assets!');
-          return 100;
-        }
-        return prev + 10;
-      });
-    }, 300);
-  }, [isUpscaling, activeMedia, showToast]);
-
   const handleImportFile = useCallback((mockItem: MediaItem) => {
     setMediaList((prev) => [mockItem, ...prev]);
     showToast(`Successfully imported: ${mockItem.title}`);
@@ -481,11 +442,12 @@ export default function App() {
       if (e.key.toLowerCase() === 'm') { e.preventDefault(); handleAddMarker(); }
       if (e.key.toLowerCase() === 'r') { e.preventDefault(); handleResetTransform(); }
       if (e.key.toLowerCase() === 'c') { e.preventDefault(); handleRunAICaptions(); }
-      if (e.key.toLowerCase() === 'u') { e.preventDefault(); handleTriggerUpscale(); }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleTogglePlay, handleSplitClip, handleAddMarker, handleResetTransform, handleRunAICaptions, handleTriggerUpscale]);
+  }, [handleTogglePlay, handleSplitClip, handleAddMarker, handleResetTransform, handleRunAICaptions]);
+
+  const selectedClip = clips.find((c) => c.id === selectedClipId) || null;
 
   // =====================================================================
   // RENDER
@@ -503,7 +465,7 @@ export default function App() {
           mediaList={mediaList}
           onAddMediaToTimeline={handleAddMediaToTimeline}
           onSelectMediaForPlayer={handleSelectMediaForPlayer}
-          activeMediaId={activeMedia.id}
+          activeMediaId={activeMedia?.id ?? null}
           onAddTextClip={handleAddTextClip}
           onSelectLUT={handleSelectLUT}
           activeLUT={effects.lut}
@@ -533,6 +495,9 @@ export default function App() {
             editingCaptions={editingCaptions}
             onCaptionTextEdit={handleCaptionTextEdit}
             jobStatus={jobStatus}
+            videoDuration={videoDuration}
+            onVideoLoaded={handleVideoLoaded}
+            clips={clips}
           />
 
           <Timeline
@@ -550,13 +515,14 @@ export default function App() {
             snapToGrid={snapToGrid}
             onToggleSnap={() => setSnapToGrid(!snapToGrid)}
             onDeleteClip={handleDeleteClip}
+            totalDuration={videoDuration}
           />
         </div>
 
         <Inspector
           activeTab={inspectorTab}
           setActiveTab={setInspectorTab}
-          selectedClip={clips.find((c) => c.id === selectedClipId) || null}
+          selectedClip={selectedClip}
           transform={transform}
           onUpdateTransform={handleUpdateTransform}
           audioSettings={audioSettings}
@@ -565,13 +531,10 @@ export default function App() {
           onUpdateEffects={handleUpdateEffects}
           isPlaying={isPlaying}
           onDeleteClip={handleDeleteClip}
-          onTriggerUpscale={handleTriggerUpscale}
-          isUpscaling={isUpscaling}
-          upscaleProgress={upscaleProgress}
-          isUpscaled={isUpscaled}
           editingCaptions={editingCaptions}
           onCaptionTextEdit={handleCaptionTextEdit}
           currentTime={currentTime}
+          onUpdateClip={handleUpdateClip}
         />
       </main>
 
@@ -591,7 +554,6 @@ export default function App() {
         onSplitClip={handleSplitClip}
         onAddMarker={handleAddMarker}
         onRunAICaptions={handleRunAICaptions}
-        onTriggerUpscale={handleTriggerUpscale}
         onResetTransform={handleResetTransform}
         onAddTextClip={handleAddTextClip}
       />
@@ -640,7 +602,7 @@ export default function App() {
                   <div className="h-full bg-primary transition-all duration-200" style={{ width: `${exportProgress}%` }} />
                 </div>
                 <p className="text-[8.5px] text-on-surface-variant/50 leading-relaxed">
-                  Rendering captions server-side. The job processes asynchronously &mdash; you can close this and check back.
+                  Rendering captions server-side. The job processes asynchronously — you can close this and check back.
                 </p>
               </div>
             )}
@@ -710,11 +672,11 @@ export default function App() {
           <span>Press</span>
           <span className="bg-white/10 px-1 py-0.5 rounded text-white font-bold">Space</span>
           <span>to play/pause</span>
-          <span className="ml-2">&bull;</span>
-          <span className="bg-white/10 px-1 py-0.5 rounded text-white font-bold">{String.fromCharCode(8984)} K</span>
+          <span className="ml-2">•</span>
+          <span className="bg-white/10 px-1 py-0.5 rounded text-white font-bold">Ctrl K</span>
           <span>for Command Palette</span>
         </div>
-        <div className="text-[9px] font-mono text-on-surface-variant tracking-widest uppercase">AutoCaption Engine</div>
+        <div className="text-[9px] font-mono text-on-surface-variant tracking-widest uppercase">AutoCaption</div>
       </footer>
     </div>
   );

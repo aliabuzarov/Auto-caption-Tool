@@ -13,16 +13,14 @@ import {
   VolumeX,
   Scissors,
   Bookmark,
-  ChevronLeft,
-  ChevronRight,
   Move,
   Type,
 } from 'lucide-react';
-import { VideoTransform, EffectSettings, Caption, CaptionChunk } from '../types';
+import { VideoTransform, EffectSettings, Caption, CaptionChunk, Clip } from '../types';
 import { MediaItem } from '../data';
 
 interface PreviewCanvasProps {
-  activeMedia: MediaItem;
+  activeMedia: MediaItem | null;
   isPlaying: boolean;
   onTogglePlay: () => void;
   transform: VideoTransform;
@@ -38,6 +36,9 @@ interface PreviewCanvasProps {
   editingCaptions?: CaptionChunk[] | null;
   onCaptionTextEdit?: (captionId: number, newText: string) => void;
   jobStatus?: string | null;
+  videoDuration?: number;
+  onVideoLoaded?: (duration: number) => void;
+  clips?: Clip[];
 }
 
 export default function PreviewCanvas({
@@ -57,6 +58,9 @@ export default function PreviewCanvas({
   editingCaptions,
   onCaptionTextEdit,
   jobStatus,
+  videoDuration = 60,
+  onVideoLoaded,
+  clips = [],
 }: PreviewCanvasProps) {
   const [isMuted, setIsMuted] = useState(false);
   const [showBoundingBox, setShowBoundingBox] = useState(true);
@@ -66,7 +70,8 @@ export default function PreviewCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Sync video element with playback state when using real video
+  const maxTime = videoDuration > 0 ? videoDuration : 60;
+
   useEffect(() => {
     if (!videoRef.current || !userVideoUrl) return;
     const video = videoRef.current;
@@ -77,7 +82,6 @@ export default function PreviewCanvas({
     }
   }, [isPlaying, userVideoUrl]);
 
-  // Seek video when currentTime changes from external controls
   useEffect(() => {
     if (!videoRef.current || !userVideoUrl) return;
     const video = videoRef.current;
@@ -86,29 +90,28 @@ export default function PreviewCanvas({
     }
   }, [currentTime, userVideoUrl]);
 
-  // Sync currentTime from video element back to state
   const handleVideoTimeUpdate = () => {
     if (videoRef.current && isPlaying) {
       onSeek(videoRef.current.currentTime);
     }
   };
 
-  // Find if there is a caption active at the current playhead
+  const handleVideoMetadata = () => {
+    if (videoRef.current && onVideoLoaded) {
+      onVideoLoaded(videoRef.current.duration);
+    }
+  };
+
   const activeCaption = activeCaptions.find(
     (cap) => currentTime >= cap.start && currentTime <= cap.end
   );
 
-  // Map active LUT setting to CSS Filter strings for direct live visual grading
   const getFilterCSS = () => {
     let cssFilters = '';
-    
-    // Core parameters from Inspector sliders
     if (effects.blur > 0) cssFilters += `blur(${effects.blur}px) `;
     if (effects.contrast !== 100) cssFilters += `contrast(${effects.contrast}%) `;
     if (effects.brightness !== 100) cssFilters += `brightness(${effects.brightness}%) `;
     if (effects.saturation !== 100) cssFilters += `saturate(${effects.saturation}%) `;
-
-    // Cinematic LUT Filters
     switch (effects.lut) {
       case 'cyberpunk':
         cssFilters += 'hue-rotate(30deg) saturate(160%) contrast(115%) sepia(10%) ';
@@ -128,11 +131,9 @@ export default function PreviewCanvas({
       default:
         break;
     }
-
     return cssFilters.trim() || 'none';
   };
 
-  // Drag simulation for the transformation overlay box
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -149,30 +150,22 @@ export default function PreviewCanvas({
       if (!isDragging) return;
       const deltaX = e.clientX - dragStartRef.current.x;
       const deltaY = e.clientY - dragStartRef.current.y;
-      
-      // Scale position offset according to client delta
       onUpdateTransform({
         x: dragStartRef.current.initialX + Math.round(deltaX),
         y: dragStartRef.current.initialY + Math.round(deltaY),
       });
     };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-    };
-
+    const handleMouseUp = () => { setIsDragging(false); };
     if (isDragging) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
     }
-
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDragging, transform, onUpdateTransform]);
 
-  // Render video frame background or stylized placeholders
   const formatTime = (timeInSecs: number) => {
     const mins = Math.floor(timeInSecs / 60);
     const secs = Math.floor(timeInSecs % 60);
@@ -182,16 +175,16 @@ export default function PreviewCanvas({
   };
 
   return (
-    <div 
+    <div
       className="flex-1 bg-surface-container-lowest border border-white/[0.06] rounded-2xl p-4 flex flex-col relative group overflow-hidden select-none shadow-[inset_0_1px_4px_rgba(255,255,255,0.05)]"
       ref={containerRef}
     >
-      {/* Header bar on Preview */}
+      {/* Header bar */}
       <div className="flex justify-between items-center mb-3.5 px-1 shrink-0">
         <div className="flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
           <span className="text-[10px] font-sans font-bold text-on-surface-variant tracking-wider uppercase">
-            Active Preview Canvas • {activeMedia.title}
+            Preview{activeMedia ? ` • ${activeMedia.title}` : ''}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -211,8 +204,8 @@ export default function PreviewCanvas({
           <button
             onClick={() => setShowBoundingBox(!showBoundingBox)}
             className={`px-2 py-1 rounded text-[9px] font-sans font-semibold tracking-wider uppercase border transition-all cursor-pointer ${
-              showBoundingBox 
-                ? 'bg-primary/10 border-primary/20 text-primary' 
+              showBoundingBox
+                ? 'bg-primary/10 border-primary/20 text-primary'
                 : 'bg-white/[0.02] border-white/[0.05] text-on-surface-variant hover:text-on-surface'
             }`}
           >
@@ -223,7 +216,6 @@ export default function PreviewCanvas({
 
       {/* Video Viewport Stage */}
       <div className="flex-1 bg-neutral-950 rounded-xl relative overflow-hidden flex items-center justify-center border border-white/[0.04]">
-        {/* Real video element (when user uploaded a file) */}
         {userVideoUrl ? (
           <video
             ref={videoRef}
@@ -231,6 +223,7 @@ export default function PreviewCanvas({
             className="absolute inset-0 w-full h-full object-contain"
             muted={isMuted}
             onTimeUpdate={handleVideoTimeUpdate}
+            onLoadedMetadata={handleVideoMetadata}
             style={{
               filter: getFilterCSS(),
               transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale / 100}) rotate(${transform.rotation}deg)`,
@@ -238,35 +231,25 @@ export default function PreviewCanvas({
             }}
           />
         ) : (
-          /* Cinematic Backdrop Frame (mock/placeholder) */
-          <div
-            className="absolute inset-0 bg-cover bg-center transition-all duration-300"
-            style={{
-              backgroundImage: `url(${activeMedia.thumbnailUrl})`,
-              filter: getFilterCSS(),
-              transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale / 100}) rotate(${transform.rotation}deg)`,
-              opacity: transform.opacity / 100,
-            }}
-          />
+          <div className="flex flex-col items-center justify-center gap-3 text-on-surface-variant/40">
+            <svg className="w-12 h-12" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+            </svg>
+            <span className="text-[11px] font-sans uppercase tracking-wider">Import a video to begin</span>
+          </div>
         )}
 
-        {/* Scanlines / Noise FX overlay if VHS LUT is on */}
         {effects.lut === 'vhs' && (
           <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,_rgba(0,0,0,0.25)_50%),_linear-gradient(90deg,_rgba(255,0,0,0.06),_rgba(0,255,0,0.02),_rgba(0,0,255,0.06))] bg-[size:100%_4px,_6px_100%] pointer-events-none opacity-40"></div>
         )}
 
-        {/* Vignette Overlay if active */}
         {effects.vignette && (
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_transparent_40%,_rgba(0,0,0,0.85)_100%)] pointer-events-none mix-blend-multiply"></div>
         )}
 
-        {/* Cinematic Crop Bars 2.39:1 Overlay if configured */}
-        <div className="absolute top-0 inset-x-0 h-[8%] bg-black/90 pointer-events-none border-b border-white/[0.02] z-10 opacity-80"></div>
-        <div className="absolute bottom-0 inset-x-0 h-[8%] bg-black/90 pointer-events-none border-t border-white/[0.02] z-10 opacity-80"></div>
-
-        {/* Interactive Transform Bounds Controls Overlay */}
+        {/* Transform Bounds Controls */}
         {showBoundingBox && (
-          <div 
+          <div
             className="absolute z-20 pointer-events-auto"
             style={{
               width: '280px',
@@ -274,53 +257,117 @@ export default function PreviewCanvas({
               transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale / 100}) rotate(${transform.rotation}deg)`,
             }}
           >
-            {/* Outline box */}
-            <div 
+            <div
               onMouseDown={handleMouseDown}
               className={`w-full h-full border border-dashed border-white/60 relative cursor-grab active:cursor-grabbing group/box flex items-center justify-center transition-colors ${
                 isDragging ? 'border-primary' : 'hover:border-primary/80'
               }`}
             >
-              {/* Central crosshair */}
               <div className="w-1.5 h-1.5 bg-white/70 rounded-full"></div>
               <div className="absolute left-1/2 -translate-x-1/2 w-px h-3 bg-white/40"></div>
               <div className="absolute top-1/2 -translate-y-1/2 w-3 h-px bg-white/40"></div>
-
-              {/* Transform Label */}
               <div className="absolute -top-6 bg-black/85 text-[8px] font-mono border border-white/[0.08] text-white/90 px-1.5 py-0.5 rounded flex items-center gap-1 opacity-0 group-hover/box:opacity-100 transition-opacity">
                 <Move className="w-2.5 h-2.5 text-primary" />
                 <span>X: {transform.x}px Y: {transform.y}px</span>
               </div>
-
-              {/* Corner Handles */}
               <div className="absolute -top-1 -left-1 w-2.5 h-2.5 bg-white border border-black/80 rounded-sm hover:scale-125 transition-transform cursor-nwse-resize"></div>
               <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-white border border-black/80 rounded-sm hover:scale-125 transition-transform cursor-nesw-resize"></div>
               <div className="absolute -bottom-1 -left-1 w-2.5 h-2.5 bg-white border border-black/80 rounded-sm hover:scale-125 transition-transform cursor-nesw-resize"></div>
               <div className="absolute -bottom-1 -right-1 w-2.5 h-2.5 bg-white border border-black/80 rounded-sm hover:scale-125 transition-transform cursor-nwse-resize"></div>
-
-              {/* Anchor rotation stem & handle */}
               <div className="absolute -top-6 left-1/2 -translate-x-1/2 w-px h-6 bg-white/60"></div>
               <div className="absolute -top-7.5 left-1/2 -translate-x-1/2 w-2.5 h-2.5 border-2 border-white rounded-full bg-background-dark hover:scale-125 hover:bg-primary transition-all cursor-crosshair"></div>
             </div>
           </div>
         )}
 
-        {/* Live Automatic Closed Captions Overlays */}
+        {clips.filter((c) => {
+          const clipEnd = c.start + c.duration;
+          return c.type === 'text' && c.text && currentTime >= c.start && currentTime <= clipEnd;
+        }).map((clip) => (
+          <div
+            key={clip.id}
+            className="absolute inset-x-0 top-1/2 -translate-y-1/2 text-center pointer-events-none z-30 transition-all duration-150"
+          >
+            <span className="inline-block tracking-wide"
+              style={{
+                backgroundColor: clip.textShowBg !== false ? (clip.textBgColor || 'rgba(0,0,0,0.7)') : 'transparent',
+                color: clip.textColor || '#ffffff',
+                fontSize: (clip.textFontSize || 20) + 'px',
+                fontWeight: clip.textBold !== false ? 'bold' : 'normal',
+                textShadow: '0 2px 4px rgba(0,0,0,0.8)',
+                padding: clip.textShowBg !== false ? '0.5rem 1.25rem' : '0',
+                borderRadius: clip.textShowBg !== false ? '0.5rem' : '0',
+                boxShadow: clip.textShowBg !== false ? '0 4px 12px rgba(0,0,0,0.5)' : 'none',
+                fontFamily: 'var(--font-sans), system-ui, sans-serif',
+              }}>
+              {clip.text}
+            </span>
+          </div>
+        ))}
+
         {showCaptions && activeCaption && (
-          <div className="absolute bottom-16 inset-x-8 text-center pointer-events-none z-30 transition-all duration-150">
+          <div className="absolute bottom-6 inset-x-8 text-center pointer-events-none z-30 transition-all duration-150">
             <span className="bg-black/90 text-primary border border-primary/25 text-xs font-sans font-semibold tracking-wider py-1.5 px-3.5 rounded-lg inline-block shadow-lg">
               {activeCaption.text}
             </span>
           </div>
         )}
+      </div>
 
-        {/* Dynamic Watermark Indicator */}
-        <div className="absolute top-12 left-6 text-white/20 text-[9px] font-mono tracking-[0.2em] pointer-events-none uppercase">
-          ONIEX STUDIOS • 4K RENDER STREAM
+      {/* Playback Controls Bar */}
+      <div className="shrink-0 mt-3 bg-surface-container-low border border-white/[0.06] rounded-xl px-5 py-2.5 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => onSeek(Math.max(0, currentTime - 10))}
+            className="text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
+            title="-10 Seconds"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onTogglePlay}
+            className="w-10 h-10 rounded-full bg-primary text-background-dark flex items-center justify-center hover:bg-white transition-all shadow-[0_0_10px_rgba(173,198,255,0.2)] hover:scale-105 cursor-pointer"
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? (
+              <Pause className="w-4 h-4 fill-current" />
+            ) : (
+              <Play className="w-4 h-4 fill-current ml-0.5" />
+            )}
+          </button>
+          <button
+            onClick={() => onSeek(Math.min(maxTime, currentTime + 10))}
+            className="text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
+            title="+10 Seconds"
+          >
+            <div className="transform scale-x-[-1]">
+              <RotateCcw className="w-4 h-4" />
+            </div>
+          </button>
+        </div>
+
+        <div className="text-[11px] font-mono text-on-surface-variant/90 tracking-widest bg-black/30 py-1 px-3 rounded-lg">
+          {formatTime(currentTime)} / {formatTime(maxTime)}
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsMuted(!isMuted)}
+            className="text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
+            title={isMuted ? 'Unmute' : 'Mute'}
+          >
+            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+          <button
+            className="text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
+            title="Toggle Cinematic View"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
-      {/* Caption Editor (collapsible, shown when captions exist) */}
+      {/* Caption Editor */}
       {showCaptionEditor && editingCaptions && editingCaptions.length > 0 && (
         <div className="bg-surface-container-lowest border border-white/[0.06] rounded-xl p-3 mt-3 max-h-48 overflow-y-auto">
           <h4 className="text-[10px] font-sans font-bold uppercase tracking-wider text-on-surface/70 mb-2">
@@ -356,62 +403,7 @@ export default function PreviewCanvas({
         </div>
       )}
 
-      {/* Floating Playback Controls */}
-      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 glass-float rounded-full px-7 py-2.5 flex items-center gap-6.5 z-30 transition-all duration-300 shadow-[0_15px_35px_rgba(0,0,0,0.8)] border border-white/[0.08] hover:scale-[1.02]">
-        <div className="text-[10px] font-mono text-on-surface-variant/80 tracking-widest bg-black/30 py-1 px-2.5 rounded-lg">
-          {formatTime(currentTime)} / 05:00
-        </div>
-
-        <div className="flex items-center gap-4.5">
-          <button 
-            onClick={() => onSeek(Math.max(0, currentTime - 10))}
-            className="text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
-            title="-10 Seconds"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-          <button
-            onClick={onTogglePlay}
-            className="w-11 h-11 rounded-full bg-primary text-background-dark flex items-center justify-center hover:bg-white transition-all shadow-[0_0_10px_rgba(173,198,255,0.2)] hover:scale-105 cursor-pointer"
-            title={isPlaying ? 'Pause' : 'Play'}
-          >
-            {isPlaying ? (
-              <Pause className="w-5 h-5 fill-current" />
-            ) : (
-              <Play className="w-5 h-5 fill-current ml-0.5" />
-            )}
-          </button>
-          <button 
-            onClick={() => onSeek(Math.min(300, currentTime + 10))}
-            className="text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
-            title="+10 Seconds"
-          >
-            <div className="transform scale-x-[-1]">
-              <RotateCcw className="w-4 h-4" />
-            </div>
-          </button>
-        </div>
-
-        <div className="w-px h-4.5 bg-white/10"></div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsMuted(!isMuted)}
-            className="text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
-            title={isMuted ? 'Unmute' : 'Mute'}
-          >
-            {isMuted ? <VolumeX className="w-4.5 h-4.5" /> : <Volume2 className="w-4.5 h-4.5" />}
-          </button>
-          <button
-            className="text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
-            title="Toggle Cinematic View"
-          >
-            <Maximize2 className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Side tools panel inside canvas block */}
+      {/* Side tools panel */}
       <div className="absolute right-8 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
         <button
           onClick={onSplitClip}

@@ -120,6 +120,12 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# React frontend built assets (served via django.contrib.staticfiles)
+_REACT_DIST = os.environ.get("REACT_DIST_DIR", str(BASE_DIR / "frontend" / "dist"))
+STATICFILES_DIRS = [
+    Path(_REACT_DIST),
+]
+
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
