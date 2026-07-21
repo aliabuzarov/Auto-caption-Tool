@@ -4,13 +4,12 @@
  */
 
 import React, { useState } from 'react';
-import { Film, Edit2, Check, Share2 } from 'lucide-react';
+import { Film, Edit2, Check, Share2, ArrowLeft } from 'lucide-react';
+import { useEditorStore } from '../store/useEditorStore';
 
-interface HeaderProps {
-  onExport: () => void;
-}
-
-export default function Header({ onExport }: HeaderProps) {
+export default function Header() {
+  const setViewMode = useEditorStore((state) => state.setViewMode);
+  const setShowExportModal = useEditorStore((state) => state.setShowExportModal);
   const [projectName, setProjectName] = useState('AutoCaption Project');
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(projectName);
@@ -35,6 +34,13 @@ export default function Header({ onExport }: HeaderProps) {
     <header className="bg-surface/75 backdrop-blur-xl border border-white/[0.06] rounded-2xl p-4 flex justify-between items-center w-full max-w-7xl mx-auto z-40 shrink-0 select-none shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
       {/* Brand / Project Info */}
       <div className="flex items-center gap-4">
+        <button
+          onClick={() => setViewMode('dashboard')}
+          className="w-10 h-10 rounded-xl bg-surface-container-high border border-white/[0.08] flex items-center justify-center hover:bg-white/[0.05] transition-all cursor-pointer group"
+          title="Back to Dashboard"
+        >
+          <ArrowLeft className="w-5 h-5 text-on-surface-variant group-hover:text-primary transition-colors" />
+        </button>
         <div className="w-10 h-10 rounded-xl bg-surface-container-high border border-white/[0.08] flex items-center justify-center shadow-inner group">
           <Film className="w-5 h-5 text-primary group-hover:scale-110 transition-transform duration-200" />
         </div>
@@ -80,7 +86,7 @@ export default function Header({ onExport }: HeaderProps) {
 
       {/* Export Button */}
       <button
-        onClick={onExport}
+        onClick={() => setShowExportModal(true)}
         className="px-4.5 py-2 bg-primary text-background-dark rounded-xl text-[11px] font-sans font-semibold tracking-wider hover:bg-white transition-all cursor-pointer flex items-center gap-1.5 shadow-[0_0_15px_rgba(173,198,255,0.3)] hover:shadow-[0_0_20px_rgba(255,255,255,0.5)]"
       >
         <Share2 className="w-3.5 h-3.5" />

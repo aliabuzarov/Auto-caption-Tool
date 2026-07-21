@@ -12,10 +12,13 @@ interface CaptionChunk {
   text: string;
   start: number;
   end: number;
+  words?: { text: string; start: number; end: number }[];
 }
 
 interface JobResponse {
   id: string;
+  name: string;
+  thumbnail?: string | null;
   status: string;
   input_video?: string;
   caption_data?: CaptionChunk[] | null;
@@ -26,6 +29,18 @@ interface JobResponse {
   whisper_model_size?: string;
 }
 
+export interface JobListResponse {
+  id: string;
+  name: string;
+  thumbnail?: string | null;
+  status: string;
+  input_video?: string;
+  output_video?: string | null;
+  error_message?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface CreateJobParams {
   videoFile: File;
   wordsPerLine?: number;
@@ -34,23 +49,72 @@ interface CreateJobParams {
 }
 
 /** POST /api/jobs/ – upload a video and start transcription. */
-export async function createJob(params: CreateJobParams): Promise<JobResponse> {
-  const form = new FormData();
-  form.append('input_video', params.videoFile);
-  if (params.wordsPerLine) form.append('words_per_line', String(params.wordsPerLine));
-  if (params.captionPosition) form.append('caption_position', params.captionPosition);
-  if (params.whisperModelSize) form.append('whisper_model_size', params.whisperModelSize);
+export function createJob(
+  params: CreateJobParams,
+  onProgress?: (percent: number) => void
+): Promise<JobResponse> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('input_video', params.videoFile);
+    if (params.wordsPerLine) form.append('words_per_line', String(params.wordsPerLine));
+    if (params.captionPosition) form.append('caption_position', params.captionPosition);
+    if (params.whisperModelSize) form.append('whisper_model_size', params.whisperModelSize);
 
-  const res = await fetch(`${API_BASE}/jobs/`, {
-    method: 'POST',
-    body: form,
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/jobs/`);
+
+    if (onProgress) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          onProgress(percent);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch (e) {
+          resolve({ id: '', name: '', status: 'error' });
+        }
+      } else {
+        try {
+          const err = JSON.parse(xhr.responseText);
+          reject(new Error(err.detail || `Upload failed (${xhr.status})`));
+        } catch (e) {
+          reject(new Error(`Upload failed (${xhr.status})`));
+        }
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.send(form);
   });
+}
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `Upload failed (${res.status})`);
-  }
+/** PATCH /api/jobs/<id>/ – update project name */
+export async function updateProject(jobId: string, name: string): Promise<JobResponse> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error('Failed to update project');
+  return res.json();
+}
 
+/** DELETE /api/jobs/<id>/ – delete project */
+export async function deleteProject(jobId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete project');
+}
+
+/** GET /api/jobs/ – list all jobs (history). */
+export async function getJobs(): Promise<JobListResponse[]> {
+  const res = await fetch(`${API_BASE}/jobs/`);
+  if (!res.ok) throw new Error('Failed to fetch job history');
   return res.json();
 }
 
@@ -80,9 +144,16 @@ export async function updateCaptions(jobId: string, captionData: CaptionChunk[])
 }
 
 /** POST /api/jobs/<id>/render/ – trigger caption burning / rendering. */
-export async function renderJob(jobId: string): Promise<JobResponse> {
+export async function renderJob(
+  jobId: string,
+  captionOffset?: { x: number; y: number },
+  exportSettings?: { resolution: string; quality: string }
+): Promise<JobResponse> {
+  const body = JSON.stringify({ captionOffset, exportSettings });
   const res = await fetch(`${API_BASE}/jobs/${jobId}/render/`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
   });
 
   if (!res.ok) {
@@ -90,6 +161,20 @@ export async function renderJob(jobId: string): Promise<JobResponse> {
     throw new Error(err.detail || `Failed to start render (${res.status})`);
   }
 
+  return res.json();
+}
+
+/** POST /api/jobs/<id>/regenerate/ – regenerate captions with new settings */
+export async function regenerateJob(jobId: string, wordsPerLine: number, whisperModelSize: string): Promise<JobResponse> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/regenerate/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ words_per_line: wordsPerLine, whisper_model_size: whisperModelSize }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Failed to regenerate (${res.status})`);
+  }
   return res.json();
 }
 

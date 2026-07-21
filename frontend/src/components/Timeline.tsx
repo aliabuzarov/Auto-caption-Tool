@@ -31,7 +31,7 @@ interface TimelineProps {
   onSeek: (time: number) => void;
   onUpdateClip: (clipId: string, updatedFields: Partial<Clip>) => void;
   zoom: number;
-  setZoom: (z: number) => void;
+  setZoom: (updater: number | ((prev: number) => number)) => void;
   markers: number[];
   snapToGrid: boolean;
   onToggleSnap: () => void;
@@ -91,16 +91,16 @@ export default function Timeline({
 
   const trimClip = (clip: Clip, delta: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    const newDuration = Math.max(5, clip.duration + delta);
+    const newDuration = Math.max(0.1, clip.duration + delta);
     if (clip.start + newDuration <= totalDuration) {
       onUpdateClip(clip.id, { duration: newDuration });
     }
   };
 
-  // --- Mouse drag-to-resize on clip edges ---
-  const [dragEdge, setDragEdge] = useState<{ clipId: string; edge: 'left' | 'right'; initialMouseX: number; initialValue: number; clipStart: number; clipDuration: number } | null>(null);
+  // --- Mouse drag-to-resize and move on clips ---
+  const [dragEdge, setDragEdge] = useState<{ clipId: string; edge: 'left' | 'right' | 'move'; initialMouseX: number; initialValue: number; clipStart: number; clipDuration: number } | null>(null);
 
-  const handleEdgeMouseDown = useCallback((clip: Clip, edge: 'left' | 'right', e: React.MouseEvent) => {
+  const handleEdgeMouseDown = useCallback((clip: Clip, edge: 'left' | 'right' | 'move', e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
     const initialValue = edge === 'left' ? clip.start : clip.duration;
@@ -115,14 +115,18 @@ export default function Timeline({
       const rect = rulerRef.current!.getBoundingClientRect();
       const dx = e.clientX - dragEdge.initialMouseX;
       const timeDelta = (dx / rect.width) * totalDuration;
+      // Snap to grid is still 5s or whatever they set, but for small clips this can be annoying.
       const snapped = snapToGrid ? Math.round(timeDelta / 5) * 5 : Math.round(timeDelta * 10) / 10;
 
       if (dragEdge.edge === 'left') {
-        const newStart = Math.max(0, Math.min(dragEdge.clipStart + dragEdge.clipDuration - 5, dragEdge.initialValue + snapped));
+        const newStart = Math.max(0, Math.min(dragEdge.clipStart + dragEdge.clipDuration - 0.1, dragEdge.initialValue + snapped));
         onUpdateClip(dragEdge.clipId, { start: newStart, duration: dragEdge.clipStart + dragEdge.clipDuration - newStart });
-      } else {
-        const newDuration = Math.max(5, Math.min(totalDuration - dragEdge.clipStart, dragEdge.initialValue + snapped));
+      } else if (dragEdge.edge === 'right') {
+        const newDuration = Math.max(0.1, Math.min(totalDuration - dragEdge.clipStart, dragEdge.initialValue + snapped));
         onUpdateClip(dragEdge.clipId, { duration: newDuration });
+      } else if (dragEdge.edge === 'move') {
+        const newStart = Math.max(0, Math.min(totalDuration - dragEdge.clipDuration, dragEdge.initialValue + snapped));
+        onUpdateClip(dragEdge.clipId, { start: newStart });
       }
     };
 
@@ -178,7 +182,7 @@ export default function Timeline({
         {/* Zoom controls */}
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setZoom(Math.max(50, zoom - 25))}
+            onClick={() => setZoom(Math.max(50, zoom > 200 ? zoom - 100 : zoom - 25))}
             className="w-6 h-6 rounded bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-white/[0.06] transition-colors cursor-pointer"
             title="Zoom Out"
           >
@@ -188,7 +192,7 @@ export default function Timeline({
             {zoom}%
           </span>
           <button
-            onClick={() => setZoom(Math.min(200, zoom + 25))}
+            onClick={() => setZoom(Math.min(2000, zoom >= 200 ? zoom + 100 : zoom + 25))}
             className="w-6 h-6 rounded bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-white/[0.06] transition-colors cursor-pointer"
             title="Zoom In"
           >
@@ -236,7 +240,23 @@ export default function Timeline({
         </div>
 
         {/* Right Scrollable timeline area */}
-        <div className="flex-1 flex flex-col overflow-x-auto overflow-y-hidden relative group/scroller">
+        <div 
+          className="flex-1 flex flex-col overflow-x-auto overflow-y-hidden relative group/scroller"
+          onWheel={(e) => {
+            // Support both vertical two-finger swipe and pinch-to-zoom (ctrlKey)
+            if (Math.abs(e.deltaY) > Math.abs(e.deltaX) || e.ctrlKey) {
+              // Differentiate between tick-based mouse wheel and smooth trackpad
+              const isMouseWheel = Math.abs(e.deltaY) >= 50 && !e.ctrlKey;
+              const step = isMouseWheel ? (e.deltaY > 0 ? -25 : 25) : (e.deltaY * -0.5);
+
+              // Use functional state update so rapid trackpad events accumulate correctly
+              setZoom((prevZoom) => {
+                const multiplier = prevZoom >= 200 ? (isMouseWheel ? 4 : 2) : 1;
+                return Math.max(50, Math.min(2000, prevZoom + (step * multiplier)));
+              });
+            }
+          }}
+        >
           {/* Timeline time ticks ruler */}
           <div
             ref={rulerRef}
@@ -311,6 +331,14 @@ export default function Timeline({
                         onClick={(e) => {
                           e.stopPropagation();
                           onSelectClip(clip.id);
+                        }}
+                        onContextMenu={(e) => { e.preventDefault(); onSelectClip(clip.id); }}
+                        onMouseDown={(e) => {
+                          if (isSelected && !isLocked) {
+                            handleEdgeMouseDown(clip, 'move', e);
+                          } else {
+                            onSelectClip(clip.id);
+                          }
                         }}
                         className={`absolute h-9.5 rounded-lg border flex flex-col justify-between p-1.5 overflow-hidden transition-all select-none cursor-pointer group ${
                           isSelected

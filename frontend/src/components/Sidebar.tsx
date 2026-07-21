@@ -17,8 +17,10 @@ import {
   Pause,
   ArrowRight,
   Sparkle,
-  Check
+  Check,
+  RotateCcw
 } from 'lucide-react';
+import { useEditorStore } from '../store/useEditorStore';
 import { SidebarTab } from '../types';
 import { MediaItem } from '../data';
 
@@ -38,6 +40,8 @@ interface SidebarProps {
   onImportFile: (item: any) => void;
   onVideoFileSelected: (file: File) => void;
   jobStatus?: string | null;
+  wordsPerLine: number;
+  setWordsPerLine: (val: number) => void;
 }
 
 export default function Sidebar({
@@ -56,7 +60,10 @@ export default function Sidebar({
   onImportFile,
   onVideoFileSelected,
   jobStatus,
+  wordsPerLine,
+  setWordsPerLine,
 }: SidebarProps) {
+  const { uploadProgress } = useEditorStore();
   const [dragActive, setDragActive] = useState(false);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -224,6 +231,21 @@ export default function Sidebar({
                   Supports MP4, MOV, AVI, WAV, MP3
                 </div>
               </div>
+
+              {uploadProgress !== null && (
+                <div className="mt-4 p-4 border border-white/[0.08] rounded-xl bg-surface-container-low">
+                  <div className="flex justify-between text-xs text-on-surface mb-2 font-medium">
+                    <span>Uploading Video...</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-surface-container-high rounded-full h-2.5 overflow-hidden">
+                    <div 
+                      className="bg-primary h-2.5 rounded-full transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    ></div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -474,6 +496,31 @@ export default function Sidebar({
                     </p>
                   </div>
                 </div>
+
+                {/* Words Per Line Control */}
+                <div className="mb-4 bg-white/[0.02] p-3 rounded-lg border border-white/[0.04]">
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-[10px] font-sans font-bold uppercase tracking-wider text-on-surface/90">
+                      Words per Caption
+                    </label>
+                    <span className="text-[10px] text-primary font-mono bg-primary/10 px-1.5 py-0.5 rounded">
+                      {wordsPerLine}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="15"
+                    step="1"
+                    value={wordsPerLine}
+                    onChange={(e) => setWordsPerLine(parseInt(e.target.value))}
+                    className="w-full h-1.5 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary"
+                  />
+                  <p className="text-[8px] text-on-surface-variant/50 mt-2 leading-relaxed">
+                    Choose "1" for fast-paced single words, or "5-10" for traditional readability.
+                  </p>
+                </div>
+
                 <button
                   disabled={isGeneratingCaptions}
                   onClick={onRunAICaptions}
@@ -492,8 +539,8 @@ export default function Sidebar({
                     </>
                   ) : hasCaptions ? (
                     <>
-                      <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                      <span>Captions Ready</span>
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Regenerate Captions</span>
                     </>
                   ) : (
                     <>

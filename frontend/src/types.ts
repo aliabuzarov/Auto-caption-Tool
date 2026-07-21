@@ -31,9 +31,9 @@ export interface Track {
   solo: boolean;
 }
 
-export type SidebarTab = 'media' | 'import' | 'text' | 'audio' | 'effects' | 'ai-tools' | 'assets';
+export type SidebarTab = 'media' | 'import' | 'text' | 'audio' | 'effects' | 'ai-tools' | 'assets' | 'export';
 
-export type InspectorTab = 'video' | 'audio' | 'effects' | 'text';
+export type InspectorTab = 'video' | 'audio' | 'effects' | 'text' | 'export';
 
 export interface VideoTransform {
   scale: number; // percentage (e.g. 124)
@@ -69,11 +69,18 @@ export interface Caption {
   text: string;
 }
 
+export interface WordTiming {
+  text: string;
+  start: number;
+  end: number;
+}
+
 export interface CaptionChunk {
   id: number;
   start: number;
   end: number;
   text: string;
+  words?: WordTiming[];
 }
 
 export type JobStatus =

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { VideoTransform, EffectSettings, Caption, CaptionChunk, Clip } from '../types';
 import { MediaItem } from '../data';
+import { useEditorStore } from '../store/useEditorStore';
 
 interface PreviewCanvasProps {
   activeMedia: MediaItem | null;
@@ -34,11 +35,14 @@ interface PreviewCanvasProps {
   onAddMarker: () => void;
   userVideoUrl?: string | null;
   editingCaptions?: CaptionChunk[] | null;
-  onCaptionTextEdit?: (captionId: number, newText: string) => void;
+  onUpdateCaptionText?: (captionId: number, newText: string) => void;
+  onUpdateCaptionTiming?: (captionId: number, start: number, end: number) => void;
   jobStatus?: string | null;
   videoDuration?: number;
   onVideoLoaded?: (duration: number) => void;
   clips?: Clip[];
+  captionOffset?: { x: number, y: number };
+  setCaptionOffset?: React.Dispatch<React.SetStateAction<{ x: number, y: number }>>;
 }
 
 export default function PreviewCanvas({
@@ -56,17 +60,24 @@ export default function PreviewCanvas({
   onAddMarker,
   userVideoUrl,
   editingCaptions,
-  onCaptionTextEdit,
+  onUpdateCaptionText,
+  onUpdateCaptionTiming,
   jobStatus,
   videoDuration = 60,
   onVideoLoaded,
   clips = [],
+  captionOffset = { x: 0, y: 0 },
+  setCaptionOffset,
 }: PreviewCanvasProps) {
+  const { hasCaptions, activeTab, setActiveTab } = useEditorStore();
   const [isMuted, setIsMuted] = useState(false);
   const [showBoundingBox, setShowBoundingBox] = useState(true);
+  const [showSafeZones, setShowSafeZones] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [showCaptionEditor, setShowCaptionEditor] = useState(false);
+  const [isDraggingCaption, setIsDraggingCaption] = useState(false);
   const dragStartRef = useRef({ x: 0, y: 0, initialX: 0, initialY: 0 });
+  const dragCaptionStartRef = useRef({ x: 0, y: 0, initialX: 0, initialY: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -91,8 +102,15 @@ export default function PreviewCanvas({
   }, [currentTime, userVideoUrl]);
 
   const handleVideoTimeUpdate = () => {
-    if (videoRef.current && isPlaying) {
-      onSeek(videoRef.current.currentTime);
+    if (videoRef.current) {
+      if (isPlaying) {
+        onSeek(videoRef.current.currentTime);
+      } else {
+        // Just keeping it synced during manual seeks
+        if (Math.abs(videoRef.current.currentTime - currentTime) > 0.1) {
+          // If we want to strictly sync, we could do it here
+        }
+      }
     }
   };
 
@@ -166,6 +184,39 @@ export default function PreviewCanvas({
     };
   }, [isDragging, transform, onUpdateTransform]);
 
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingCaption || !setCaptionOffset) return;
+      const deltaX = e.clientX - dragCaptionStartRef.current.x;
+      const deltaY = e.clientY - dragCaptionStartRef.current.y;
+      setCaptionOffset({
+        x: dragCaptionStartRef.current.initialX + Math.round(deltaX),
+        y: dragCaptionStartRef.current.initialY + Math.round(deltaY),
+      });
+    };
+    const handleMouseUp = () => { setIsDraggingCaption(false); };
+    if (isDraggingCaption) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingCaption, setCaptionOffset]);
+
+  const handleCaptionMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingCaption(true);
+    dragCaptionStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      initialX: captionOffset.x,
+      initialY: captionOffset.y,
+    };
+  };
+
   const formatTime = (timeInSecs: number) => {
     const mins = Math.floor(timeInSecs / 60);
     const secs = Math.floor(timeInSecs % 60);
@@ -211,6 +262,16 @@ export default function PreviewCanvas({
           >
             Transform Box
           </button>
+          <button
+            onClick={() => setShowSafeZones(!showSafeZones)}
+            className={`px-2 py-1 rounded text-[9px] font-sans font-semibold tracking-wider uppercase border transition-all cursor-pointer ${
+              showSafeZones
+                ? 'bg-primary/10 border-primary/20 text-primary'
+                : 'bg-white/[0.02] border-white/[0.05] text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            Safe Zones
+          </button>
         </div>
       </div>
 
@@ -232,10 +293,24 @@ export default function PreviewCanvas({
           />
         ) : (
           <div className="flex flex-col items-center justify-center gap-3 text-on-surface-variant/40">
-            <svg className="w-12 h-12" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+            <svg className="w-16 h-16 mb-2" fill="none" stroke="currentColor" strokeWidth="1.2" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
             </svg>
-            <span className="text-[11px] font-sans uppercase tracking-wider">Import a video to begin</span>
+            <span className="text-lg font-sans font-bold tracking-wider text-on-surface">Step 1: Import Video</span>
+            <span className="text-xs font-sans tracking-wider text-on-surface-variant text-center max-w-xs">
+              Go to the <button onClick={() => setActiveTab('import')} className="text-primary hover:underline">Import Tab</button> to upload a video or audio file and begin your project.
+            </span>
+          </div>
+        )}
+
+        {/* Step 2 Overlay if video exists but no captions */}
+        {userVideoUrl && !hasCaptions && activeTab !== 'ai-tools' && (
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-10 flex flex-col items-center justify-center gap-3 text-on-surface">
+            <Type className="w-16 h-16 mb-2 text-primary opacity-80" />
+            <span className="text-lg font-sans font-bold tracking-wider">Step 2: Generate Captions</span>
+            <span className="text-xs font-sans tracking-wider text-on-surface-variant text-center max-w-xs">
+              Click on the <button onClick={() => setActiveTab('ai-tools')} className="text-primary hover:underline">AI Tools Tab</button> to automatically generate and style captions for your video.
+            </span>
           </div>
         )}
 
@@ -245,6 +320,26 @@ export default function PreviewCanvas({
 
         {effects.vignette && (
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_transparent_40%,_rgba(0,0,0,0.85)_100%)] pointer-events-none mix-blend-multiply"></div>
+        )}
+
+        {/* TikTok/Reels Safe Zones Overlay */}
+        {showSafeZones && (
+          <div className="absolute inset-0 pointer-events-none z-30 flex items-center justify-center">
+            <div className="relative w-full h-full border border-dashed border-white/20">
+              {/* Top UI Area */}
+              <div className="absolute top-0 left-0 right-0 h-[10%] bg-red-500/20 border-b border-dashed border-red-500/50 flex items-center justify-center">
+                <span className="text-[10px] text-red-200/80 font-bold uppercase tracking-widest">Top UI</span>
+              </div>
+              {/* Right Side Action Buttons */}
+              <div className="absolute bottom-[20%] right-0 w-[20%] h-[40%] bg-red-500/20 border-l border-t border-b border-dashed border-red-500/50 flex items-center justify-center">
+                <span className="text-[10px] text-red-200/80 font-bold uppercase tracking-widest rotate-90 whitespace-nowrap">Interactions</span>
+              </div>
+              {/* Bottom Description / Audio */}
+              <div className="absolute bottom-0 left-0 right-0 h-[20%] bg-red-500/20 border-t border-dashed border-red-500/50 flex items-center justify-center">
+                <span className="text-[10px] text-red-200/80 font-bold uppercase tracking-widest">Description & Audio</span>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Transform Bounds Controls */}
@@ -306,8 +401,14 @@ export default function PreviewCanvas({
         ))}
 
         {showCaptions && activeCaption && (
-          <div className="absolute bottom-6 inset-x-8 text-center pointer-events-none z-30 transition-all duration-150">
-            <span className="bg-black/90 text-primary border border-primary/25 text-xs font-sans font-semibold tracking-wider py-1.5 px-3.5 rounded-lg inline-block shadow-lg">
+          <div 
+            className="absolute bottom-6 inset-x-8 text-center z-30 transition-none"
+            style={{ transform: `translate(${captionOffset.x}px, ${captionOffset.y}px)` }}
+          >
+            <span 
+              onMouseDown={handleCaptionMouseDown}
+              className="bg-black/90 text-primary border border-primary/25 text-xs font-sans font-semibold tracking-wider py-1.5 px-3.5 rounded-lg inline-block shadow-lg cursor-move hover:scale-105 hover:border-primary/60 transition-all select-none"
+            >
               {activeCaption.text}
             </span>
           </div>
@@ -386,13 +487,30 @@ export default function PreviewCanvas({
                   }`}
                   onClick={() => onSeek(chunk.start)}
                 >
-                  <span className="text-[9px] font-mono text-on-surface-variant/60 shrink-0 w-16">
-                    {formatTime(chunk.start)}
-                  </span>
+                  <div className="flex flex-col gap-1 w-16 shrink-0">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={chunk.start.toFixed(2)}
+                      onChange={(e) => onUpdateCaptionTiming?.(chunk.id, parseFloat(e.target.value) || 0, chunk.end)}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Start Time (s)"
+                      className="bg-transparent border-b border-white/[0.06] text-[9px] font-mono text-on-surface-variant py-0.5 outline-none focus:border-primary/50 transition-colors w-full"
+                    />
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={chunk.end.toFixed(2)}
+                      onChange={(e) => onUpdateCaptionTiming?.(chunk.id, chunk.start, parseFloat(e.target.value) || 0)}
+                      onClick={(e) => e.stopPropagation()}
+                      title="End Time (s)"
+                      className="bg-transparent border-b border-white/[0.06] text-[9px] font-mono text-on-surface-variant py-0.5 outline-none focus:border-primary/50 transition-colors w-full"
+                    />
+                  </div>
                   <input
                     type="text"
                     value={chunk.text}
-                    onChange={(e) => onCaptionTextEdit?.(chunk.id, e.target.value)}
+                    onChange={(e) => onUpdateCaptionText?.(chunk.id, e.target.value)}
                     onClick={(e) => e.stopPropagation()}
                     className="flex-1 bg-transparent border-b border-white/[0.06] text-[10px] font-sans text-on-surface py-0.5 outline-none focus:border-primary/50 transition-colors"
                   />

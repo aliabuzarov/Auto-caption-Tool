@@ -43,6 +43,7 @@ import {
   renderJob,
   downloadVideo,
   mediaUrl,
+  regenerateJob,
 } from './api';
 
 import Header from './components/Header';
@@ -51,67 +52,34 @@ import PreviewCanvas from './components/PreviewCanvas';
 import Timeline from './components/Timeline';
 import Inspector from './components/Inspector';
 import CommandPalette from './components/CommandPalette';
+import Dashboard from './components/Dashboard';
+import { useEditorStore } from './store/useEditorStore';
 
 export default function App() {
-  // --- WORKSPACE CORE STATES ---
-  const [activeTab, setActiveTab] = useState<SidebarTab>('import');
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('video');
-  const [mediaList, setMediaList] = useState<MediaItem[]>([]);
-  const [tracks, setTracks] = useState<Track[]>(INITIAL_TRACKS);
-  const [clips, setClips] = useState<Clip[]>([]);
-  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
-  const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
+  const {
+    viewMode, setViewMode, activeTab, setActiveTab,
+    inspectorTab, setInspectorTab, mediaList, setMediaList,
+    tracks, setTracks, clips, setClips, selectedClipId, setSelectedClipId,
+    activeMedia, setActiveMedia, currentTime, setCurrentTime,
+    isPlaying, setIsPlaying, videoDuration, setVideoDuration,
+    transform, setTransform, audioSettings, setAudioSettings,
+    effects, setEffects, markers, setMarkers, snapToGrid, setSnapToGrid,
+    zoom, setZoom, isGeneratingCaptions, setIsGeneratingCaptions,
+    uploadProgress, setUploadProgress,
+    hasCaptions, setHasCaptions, activeCaptions, setActiveCaptions,
+    wordsPerLine, setWordsPerLine, userVideoFile, setUserVideoFile,
+    userVideoUrl, setUserVideoUrl, jobId, setJobId, jobStatus, setJobStatus,
+    editingCaptions, setEditingCaptions, captionOffset, setCaptionOffset,
+    showExportModal, setShowExportModal, isExporting, setIsExporting,
+    exportResolution, setExportResolution, exportQuality, setExportQuality,
+    exportProgress, setExportProgress, isExported, setIsExported,
+    downloadUrl, setDownloadUrl, toasts, showToast,
+    saveHistory, undo, redo
+  } = useEditorStore();
 
-  // --- PLAYBACK ENGINE STATES ---
-  const [currentTime, setCurrentTime] = useState<number>(0);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [videoDuration, setVideoDuration] = useState<number>(60); // updated when real video loads
-
-  // --- INSPECTOR PARAMETER STATES ---
-  const [transform, setTransform] = useState<VideoTransform>({
-    scale: 100, x: 0, y: 0, rotation: 0, opacity: 100,
-  });
-  const [audioSettings, setAudioSettings] = useState<AudioSettings>({
-    volume: 82, bass: 40, treble: 65, enhancedVoice: false,
-  });
-  const [effects, setEffects] = useState<EffectSettings>({
-    blur: 0, contrast: 100, brightness: 100, saturation: 100,
-    lut: 'none', vignette: false, chromaticAberration: 0,
-  });
-
-  // --- MARKERS & SNAP ---
-  const [markers, setMarkers] = useState<number[]>([]);
-  const [snapToGrid, setSnapToGrid] = useState<boolean>(true);
-
-  // --- AI PROCESS ENGINE STATES ---
-  const [isGeneratingCaptions, setIsGeneratingCaptions] = useState<boolean>(false);
-  const [hasCaptions, setHasCaptions] = useState<boolean>(false);
-  const [activeCaptions, setActiveCaptions] = useState<Caption[]>([]);
-
-  // --- BACKEND JOB FLOW ---
-  const [userVideoFile, setUserVideoFile] = useState<File | null>(null);
-  const [userVideoUrl, setUserVideoUrl] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
-  const [editingCaptions, setEditingCaptions] = useState<CaptionChunk[] | null>(null);
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // --- PALETTE & MODALS ---
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
-  const [showExportModal, setShowExportModal] = useState<boolean>(false);
-  const [isExporting, setIsExporting] = useState<boolean>(false);
-  const [exportProgress, setExportProgress] = useState<number>(0);
-  const [isExported, setIsExported] = useState<boolean>(false);
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exportPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // --- NOTIFICATION TOAST ---
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  const showToast = useCallback((msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
-  }, []);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -167,16 +135,18 @@ export default function App() {
   }, [clips]);
 
   const handleUpdateClip = useCallback((clipId: string, updatedFields: Partial<Clip>) => {
+    saveHistory();
     setClips((prev) =>
       prev.map((clip) => (clip.id === clipId ? { ...clip, ...updatedFields } : clip)),
     );
-  }, []);
+  }, [saveHistory]);
 
   const handleDeleteClip = useCallback((clipId: string) => {
+    saveHistory();
     setClips((prev) => prev.filter((c) => c.id !== clipId));
     if (selectedClipId === clipId) setSelectedClipId(null);
     showToast('Removed clip from active timeline');
-  }, [selectedClipId, showToast]);
+  }, [selectedClipId, saveHistory, showToast]);
 
   const handleAddMarker = useCallback(() => {
     if (!markers.includes(currentTime)) {
@@ -193,6 +163,7 @@ export default function App() {
     const clipToSplit = clips.find((c) => c.id === selectedClipId);
     if (!clipToSplit) return;
     if (currentTime > clipToSplit.start && currentTime < clipToSplit.start + clipToSplit.duration) {
+      saveHistory();
       const fp = currentTime - clipToSplit.start;
       const sp = clipToSplit.start + clipToSplit.duration - currentTime;
       const clip1: Clip = { ...clipToSplit, id: `${clipToSplit.id}-pt1`, duration: fp };
@@ -255,6 +226,9 @@ export default function App() {
   // =====================================================================
   const handleVideoFileSelected = useCallback((file: File) => {
     setUserVideoFile(file);
+    if (userVideoUrl && userVideoUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(userVideoUrl);
+    }
     const url = URL.createObjectURL(file);
     setUserVideoUrl(url);
     setCurrentTime(0);
@@ -271,38 +245,68 @@ export default function App() {
   // =====================================================================
   const handleVideoLoaded = useCallback((duration: number) => {
     setVideoDuration(duration);
+    setClips((prev) => {
+      // If we already have a video clip, just update its duration or leave it
+      if (prev.some((c) => c.trackId === 'video')) return prev;
+      
+      const videoClip: Clip = {
+        id: `video-main`,
+        trackId: 'video',
+        title: 'Main Video',
+        start: 0,
+        duration: duration,
+        color: 'from-surface-container-high to-surface-container-highest',
+        type: 'video',
+      };
+      return [...prev, videoClip];
+    });
   }, []);
 
   // =====================================================================
   // REAL BACKEND FLOW: Upload video → transcribe → get captions.
-  // =====================================================================
   const handleRunAICaptions = useCallback(async () => {
     if (isGeneratingCaptions) return;
 
-    if (!userVideoFile) {
+    if (!userVideoFile && !jobId) {
       showToast('Import a video first in the Import tab, then generate captions');
       setActiveTab('import');
       return;
     }
 
     setIsGeneratingCaptions(true);
-    showToast('Uploading video and starting transcription...');
+    showToast(jobId && hasCaptions ? 'Regenerating captions...' : 'Uploading video and starting transcription...');
 
     try {
-      const job = await createJob({
-        videoFile: userVideoFile,
-        wordsPerLine: 3,
-        captionPosition: 'bottom',
-        whisperModelSize: 'small',
-      });
+      let currentJobId = jobId;
 
-      setJobId(job.id);
-      setJobStatus(job.status as JobStatus);
+      if (jobId && hasCaptions) {
+        // Regenerate existing job
+        await regenerateJob(jobId, wordsPerLine, 'small');
+      } else if (userVideoFile) {
+        // Create new job
+        setUploadProgress(0);
+        const job = await createJob({
+          videoFile: userVideoFile,
+          wordsPerLine: wordsPerLine,
+          captionPosition: 'bottom',
+          whisperModelSize: 'small',
+        }, (percent) => setUploadProgress(percent));
+        
+        setUploadProgress(null);
+        currentJobId = job.id;
+        setJobId(job.id);
+        setJobStatus(job.status as JobStatus);
+      }
+
+      if (!currentJobId) {
+        throw new Error("No job ID available");
+      }
 
       // Poll for transcription completion
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
       pollTimerRef.current = setInterval(async () => {
         try {
-          const currentJob = await getJob(job.id);
+          const currentJob = await getJob(currentJobId as string);
           setJobStatus(currentJob.status as JobStatus);
 
           if (currentJob.status === 'ready_for_review') {
@@ -322,6 +326,29 @@ export default function App() {
             }));
             setActiveCaptions(captions);
             setHasCaptions(true);
+
+            // Populate timeline clips for text track
+            const textClips: Clip[] = captions.map((c) => ({
+              id: `text-${c.id}`,
+              trackId: 'text',
+              title: c.text,
+              start: c.start,
+              duration: c.end - c.start,
+              color: 'from-pink-950/40 to-rose-950/40 border-pink-500/30',
+              type: 'text',
+              text: c.text,
+              textColor: '#ffffff',
+              textBgColor: 'rgba(0,0,0,0.7)',
+              textFontSize: 20,
+              textBold: true,
+              textShowBg: true,
+            }));
+            
+            setClips((prev) => {
+              // Replace existing text clips
+              const filtered = prev.filter(c => c.trackId !== 'text');
+              return [...filtered, ...textClips];
+            });
 
             // Update video URL to backend-served file
             if (currentJob.input_video) {
@@ -344,14 +371,13 @@ export default function App() {
           showToast('Lost connection while transcribing: ' + err.message);
         }
       }, 2000);
-    } catch (err: any) {
+    } catch (e: any) {
+      setUploadProgress(null);
       setIsGeneratingCaptions(false);
-      showToast('Upload failed: ' + err.message);
+      showToast(e.message || 'Failed to generate captions');
     }
-  }, [isGeneratingCaptions, userVideoFile, showToast, setActiveTab]);
+  }, [isGeneratingCaptions, userVideoFile, showToast, setActiveTab, wordsPerLine]);
 
-  // =====================================================================
-  // Update a single caption's text (in the editor).
   // =====================================================================
   const handleCaptionTextEdit = useCallback((captionId: number, newText: string) => {
     setEditingCaptions((prev) =>
@@ -361,6 +387,23 @@ export default function App() {
     );
     setActiveCaptions((prev) =>
       prev.map((c) => (c.id === String(captionId) ? { ...c, text: newText } : c)),
+    );
+    setClips((prev) =>
+      prev.map((c) => (c.id === `text-${captionId}` ? { ...c, text: newText, title: newText } : c))
+    );
+  }, []);
+
+  const handleCaptionTimingEdit = useCallback((captionId: number, start: number, end: number) => {
+    setEditingCaptions((prev) =>
+      prev
+        ? prev.map((c) => (c.id === captionId ? { ...c, start, end } : c))
+        : null,
+    );
+    setActiveCaptions((prev) =>
+      prev.map((c) => (c.id === String(captionId) ? { ...c, start, end } : c)),
+    );
+    setClips((prev) =>
+      prev.map((c) => (c.id === `text-${captionId}` ? { ...c, start, duration: end - start } : c))
     );
   }, []);
 
@@ -388,11 +431,11 @@ export default function App() {
       await updateCaptions(jobId, editingCaptions);
 
       // Step 2: Trigger render
-      setExportProgress(40);
-      await renderJob(jobId);
+      await renderJob(jobId, captionOffset, { resolution: exportResolution, quality: exportQuality });
       setJobStatus('rendering');
 
       // Step 3: Poll for render completion
+      if (exportPollTimerRef.current) clearInterval(exportPollTimerRef.current);
       exportPollTimerRef.current = setInterval(async () => {
         try {
           const currentJob = await getJob(jobId);
@@ -427,7 +470,7 @@ export default function App() {
       setIsExporting(false);
       showToast('Export failed: ' + err.message);
     }
-  }, [jobId, editingCaptions, showToast]);
+  }, [jobId, editingCaptions, showToast, captionOffset]);
 
   // =====================================================================
   // SHORTCUTS
@@ -436,18 +479,89 @@ export default function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+      
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); redo(); return; }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setIsCommandPaletteOpen((prev) => !prev); }
+      
       if (e.key === ' ') { e.preventDefault(); handleTogglePlay(); }
       if (e.key.toLowerCase() === 's') { e.preventDefault(); handleSplitClip(); }
       if (e.key.toLowerCase() === 'm') { e.preventDefault(); handleAddMarker(); }
       if (e.key.toLowerCase() === 'r') { e.preventDefault(); handleResetTransform(); }
       if (e.key.toLowerCase() === 'c') { e.preventDefault(); handleRunAICaptions(); }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedClipId) {
+          e.preventDefault();
+          handleDeleteClip(selectedClipId);
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleTogglePlay, handleSplitClip, handleAddMarker, handleResetTransform, handleRunAICaptions]);
+  }, [handleTogglePlay, handleSplitClip, handleAddMarker, handleResetTransform, handleRunAICaptions, handleDeleteClip, selectedClipId, undo, redo]);
 
   const selectedClip = clips.find((c) => c.id === selectedClipId) || null;
+
+  // =====================================================================
+  // PROJECT NAVIGATION
+  // =====================================================================
+  const handleSelectProject = async (projectId: string) => {
+    try {
+      const job = await getJob(projectId);
+      setJobId(job.id);
+      setJobStatus(job.status as JobStatus);
+      if (job.caption_data) {
+        setEditingCaptions(job.caption_data);
+        const mappedCaptions = job.caption_data.map((c) => ({ id: String(c.id), start: c.start, end: c.end, text: c.text }));
+        setActiveCaptions(mappedCaptions);
+        setHasCaptions(true);
+
+        const textClips: Clip[] = mappedCaptions.map((c) => ({
+          id: `text-${c.id}`,
+          trackId: 'text',
+          title: c.text,
+          start: c.start,
+          duration: c.end - c.start,
+          color: 'from-pink-950/40 to-rose-950/40 border-pink-500/30',
+          type: 'text',
+          text: c.text,
+          textColor: '#ffffff',
+          textBgColor: 'rgba(0,0,0,0.7)',
+          textFontSize: 20,
+          textBold: true,
+          textShowBg: true,
+        }));
+        
+        setClips((prev) => {
+          const filtered = prev.filter(c => c.trackId !== 'text');
+          return [...filtered, ...textClips];
+        });
+      } else {
+        setEditingCaptions(null);
+        setActiveCaptions([]);
+        setHasCaptions(false);
+        setClips(prev => prev.filter(c => c.trackId !== 'text'));
+      }
+      if (job.input_video) {
+        setUserVideoUrl(mediaUrl(job.input_video));
+      }
+      setViewMode('editor');
+    } catch (err: any) {
+      showToast('Failed to load project: ' + err.message);
+    }
+  };
+
+  const handleCreateProject = () => {
+    setJobId(null);
+    setJobStatus(null);
+    setEditingCaptions(null);
+    setActiveCaptions([]);
+    setHasCaptions(false);
+    setUserVideoFile(null);
+    setUserVideoUrl(null);
+    setActiveTab('import');
+    setViewMode('editor');
+  };
 
   // =====================================================================
   // RENDER
@@ -456,7 +570,14 @@ export default function App() {
     <div className="h-screen w-screen flex flex-col p-6 gap-5 bg-background-dark text-on-surface antialiased overflow-hidden select-none font-sans relative">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(173,198,255,0.035)_0%,_transparent_65%)] pointer-events-none z-0"></div>
 
-      <Header onExport={() => setShowExportModal(true)} />
+      {viewMode === 'dashboard' ? (
+        <Dashboard
+          onSelectProject={handleSelectProject}
+          onCreateNewProject={handleCreateProject}
+        />
+      ) : (
+        <>
+          <Header onExport={() => setShowExportModal(true)} onBackToDashboard={() => setViewMode('dashboard')} />
 
       <main className="flex-1 flex gap-5 min-h-0 z-10 w-full max-w-7xl mx-auto">
         <Sidebar
@@ -475,6 +596,8 @@ export default function App() {
           onImportFile={handleImportFile}
           onVideoFileSelected={handleVideoFileSelected}
           jobStatus={jobStatus}
+          wordsPerLine={wordsPerLine}
+          setWordsPerLine={setWordsPerLine}
         />
 
         <div className="flex-1 flex flex-col gap-5 min-w-0">
@@ -493,7 +616,10 @@ export default function App() {
             onAddMarker={handleAddMarker}
             userVideoUrl={userVideoUrl}
             editingCaptions={editingCaptions}
-            onCaptionTextEdit={handleCaptionTextEdit}
+            onUpdateCaptionText={handleCaptionTextEdit}
+            onUpdateCaptionTiming={handleCaptionTimingEdit}
+            captionOffset={captionOffset}
+            setCaptionOffset={setCaptionOffset}
             jobStatus={jobStatus}
             videoDuration={videoDuration}
             onVideoLoaded={handleVideoLoaded}
@@ -509,8 +635,8 @@ export default function App() {
             currentTime={currentTime}
             onSeek={handleSeek}
             onUpdateClip={handleUpdateClip}
-            zoom={100}
-            setZoom={() => {}}
+            zoom={zoom}
+            setZoom={setZoom}
             markers={markers}
             snapToGrid={snapToGrid}
             onToggleSnap={() => setSnapToGrid(!snapToGrid)}
@@ -537,16 +663,20 @@ export default function App() {
           onUpdateClip={handleUpdateClip}
         />
       </main>
-
-      {/* Toast */}
-      {toastMessage && (
-        <div className="fixed bottom-6 left-6 z-50 glass-float px-4.5 py-2.5 rounded-xl border border-white/[0.08] flex items-center gap-2.5 shadow-2xl animate-[fadeIn_0.15s_ease-out]">
-          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
-          <span className="text-[10.5px] font-sans font-bold tracking-wide uppercase text-white">{toastMessage}</span>
-        </div>
+      </>
       )}
 
-      {/* Command palette */}
+      {/* Toasts */}
+      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none">
+        {toasts.map((toast) => (
+          <div key={toast.id} className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div className="bg-surface-container-high/90 backdrop-blur-xl border border-white/10 px-5 py-2.5 rounded-full flex items-center gap-2 shadow-2xl">
+              <Info className="w-3.5 h-3.5 text-primary" />
+              <span className="text-[10.5px] font-sans font-bold tracking-wide uppercase text-white">{toast.msg}</span>
+            </div>
+          </div>
+        ))}
+      </div>{/* Command palette */}
       <CommandPalette
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
@@ -580,9 +710,50 @@ export default function App() {
 
             {/* Show caption data summary */}
             {!isExporting && !isExported && editingCaptions && (
-              <div className="bg-white/[0.01] border border-white/[0.04] rounded-xl p-3 flex justify-between text-[10px] font-sans">
+              <div className="bg-white/[0.01] border border-white/[0.04] rounded-xl p-3 flex justify-between text-[10px] font-sans mb-2">
                 <span className="text-on-surface-variant/80">Captions ready</span>
                 <span className="text-white font-mono font-bold">{editingCaptions.length} chunks</span>
+              </div>
+            )}
+
+            {/* Export Settings */}
+            {!isExporting && !isExported && (
+              <div className="space-y-4 mb-2">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-sans font-bold uppercase tracking-wider text-on-surface-variant">Resolution</label>
+                  <div className="relative">
+                    <select
+                      value={exportResolution}
+                      onChange={(e) => setExportResolution(e.target.value)}
+                      className="w-full bg-surface-container-low border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm font-sans text-white appearance-none cursor-pointer hover:border-white/[0.1] transition-all focus:outline-none focus:border-primary"
+                    >
+                      <option value="original">Original</option>
+                      <option value="1080p">1080p (FHD)</option>
+                      <option value="4K">4K (UHD)</option>
+                    </select>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-on-surface-variant">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 9-7 7-7-7" /></svg>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-sans font-bold uppercase tracking-wider text-on-surface-variant">Quality</label>
+                  <div className="relative">
+                    <select
+                      value={exportQuality}
+                      onChange={(e) => setExportQuality(e.target.value)}
+                      className="w-full bg-surface-container-low border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm font-sans text-white appearance-none cursor-pointer hover:border-white/[0.1] transition-all focus:outline-none focus:border-primary"
+                    >
+                      <option value="low">Low (Fast, smaller size)</option>
+                      <option value="medium">Medium (Standard)</option>
+                      <option value="high">High (Slower, larger size)</option>
+                    </select>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-on-surface-variant">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m19 9-7 7-7-7" /></svg>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
