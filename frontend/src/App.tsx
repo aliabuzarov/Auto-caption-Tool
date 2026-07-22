@@ -210,6 +210,7 @@ export default function App() {
       textFontSize: 20,
       textBold: true,
       textShowBg: true,
+      isCustomText: true,
     };
     setClips((prev) => [...prev, newClip]);
     setSelectedClipId(newClip.id);
@@ -342,6 +343,7 @@ export default function App() {
               textFontSize: 20,
               textBold: true,
               textShowBg: true,
+              isAICaption: true,
             }));
             
             setClips((prev) => {
@@ -389,7 +391,7 @@ export default function App() {
       prev.map((c) => (c.id === String(captionId) ? { ...c, text: newText } : c)),
     );
     setClips((prev) =>
-      prev.map((c) => (c.id === `text-${captionId}` ? { ...c, text: newText, title: newText } : c))
+      prev.map((c) => (c.id === `text-${captionId}` ? { ...c, text: newText, title: newText, isAICaption: true } : c))
     );
   }, []);
 
@@ -403,7 +405,7 @@ export default function App() {
       prev.map((c) => (c.id === String(captionId) ? { ...c, start, end } : c)),
     );
     setClips((prev) =>
-      prev.map((c) => (c.id === `text-${captionId}` ? { ...c, start, duration: end - start } : c))
+      prev.map((c) => (c.id === `text-${captionId}` ? { ...c, start, duration: end - start, isAICaption: true } : c))
     );
   }, []);
 
@@ -530,6 +532,7 @@ export default function App() {
           textFontSize: 20,
           textBold: true,
           textShowBg: true,
+          isAICaption: true,
         }));
         
         setClips((prev) => {
@@ -559,6 +562,7 @@ export default function App() {
     setHasCaptions(false);
     setUserVideoFile(null);
     setUserVideoUrl(null);
+    setClips([]);
     setActiveTab('import');
     setViewMode('editor');
   };

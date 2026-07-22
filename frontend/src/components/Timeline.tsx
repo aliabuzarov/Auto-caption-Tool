@@ -179,7 +179,7 @@ export default function Timeline({
           )}
         </div>
 
-        {/* Zoom controls */}
+        {/* Zoom controls & Touchpad Slider */}
         <div className="flex items-center gap-2">
           <button
             onClick={() => setZoom(Math.max(50, zoom > 200 ? zoom - 100 : zoom - 25))}
@@ -188,6 +188,18 @@ export default function Timeline({
           >
             <ZoomOut className="w-3.5 h-3.5" />
           </button>
+
+          <input
+            type="range"
+            min="50"
+            max="1000"
+            step="25"
+            value={zoom}
+            onChange={(e) => setZoom(Number(e.target.value))}
+            className="w-24 h-1.5 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary"
+            title="Drag slider to zoom timeline interval"
+          />
+
           <span className="text-[9px] font-mono text-on-surface-variant w-10 text-center tracking-wide uppercase">
             {zoom}%
           </span>
@@ -376,6 +388,13 @@ export default function Timeline({
                             </div>
                             <div className="flex-1 flex justify-center gap-1 items-center pointer-events-auto">
                               <button
+                                onClick={(e) => { e.stopPropagation(); onUpdateClip(clip.id, { duration: Math.max(0.5, clip.duration - 1) }); }}
+                                className="px-1 py-0.5 rounded bg-black/85 hover:bg-white/10 text-[7px] font-mono text-tertiary hover:text-white transition-colors"
+                                title="Shorten duration (-1s)"
+                              >
+                                -1s
+                              </button>
+                              <button
                                 onClick={(e) => shiftClip(clip, -5, e)}
                                 className="w-4 h-4 rounded bg-black/75 hover:bg-white/[0.08] flex items-center justify-center text-on-surface-variant hover:text-white"
                                 title="Shift left -5s"
@@ -391,6 +410,13 @@ export default function Timeline({
                                 title="Shift right +5s"
                               >
                                 <ChevronRight className="w-2.5 h-2.5" />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); onUpdateClip(clip.id, { duration: clip.duration + 1 }); }}
+                                className="px-1 py-0.5 rounded bg-black/85 hover:bg-primary/20 text-[7px] font-mono text-primary hover:text-white transition-colors"
+                                title="Extend duration (+1s)"
+                              >
+                                +1s
                               </button>
                             </div>
                             <div

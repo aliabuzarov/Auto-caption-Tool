@@ -24,14 +24,16 @@ class CaptionJob(models.Model):
         MEDIUM = "medium", "Medium"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255, default="Untitled Project")
     input_video = models.FileField(upload_to="videos/")
+    thumbnail = models.ImageField(upload_to="thumbnails/", null=True, blank=True)
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
         default=Status.PENDING,
         db_index=True,
     )
-    words_per_line = models.PositiveSmallIntegerField(default=3)
+    words_per_line = models.PositiveSmallIntegerField(default=1)
     caption_position = models.CharField(
         max_length=10,
         choices=CaptionPosition.choices,

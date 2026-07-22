@@ -18,6 +18,8 @@ services:
   # -----------------------------------------------------------------------
   redis:
     image: redis:7-alpine
+    ports:
+      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s
@@ -50,16 +52,15 @@ services:
       sh -c "python manage.py migrate &&
              python manage.py runserver 0.0.0.0:8001"
     ports:
+      - "8000:8001"
       - "8001:8001"
     volumes:
       - .:/app                # live-code editing during development
       - media_volume:/app/media  # shared uploaded + rendered video storage
+    env_file:
+      - .env
     environment:
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      DATABASE_URL: postgres://autocaption:autocaption@db:5432/autocaption
-      DJANGO_SECRET_KEY: docker-compose-insecure-dev-key
-      REACT_DIST_DIR: /frontend-dist
+      REACT_DIST_DIR: /app/frontend/dist
     depends_on:
       redis:
         condition: service_healthy
@@ -77,12 +78,10 @@ services:
     volumes:
       - .:/app
       - media_volume:/app/media
+    env_file:
+      - .env
     environment:
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      DATABASE_URL: postgres://autocaption:autocaption@db:5432/autocaption
-      DJANGO_SECRET_KEY: docker-compose-insecure-dev-key
-      REACT_DIST_DIR: /frontend-dist
+      REACT_DIST_DIR: /app/frontend/dist
     depends_on:
       redis:
         condition: service_healthy

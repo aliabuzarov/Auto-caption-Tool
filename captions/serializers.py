@@ -3,12 +3,29 @@ from rest_framework import serializers
 
 from .models import CaptionJob
 
+class JobListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CaptionJob
+        fields = [
+            "id",
+            "name",
+            "thumbnail",
+            "input_video",
+            "status",
+            "output_video",
+            "error_message",
+            "created_at",
+            "updated_at",
+        ]
+
 
 class CaptionJobSerializer(serializers.ModelSerializer):
     class Meta:
         model = CaptionJob
         fields = [
             "id",
+            "name",
+            "thumbnail",
             "input_video",
             "status",
             "words_per_line",
@@ -35,10 +52,7 @@ class CaptionDataSerializer(serializers.Serializer):
     """Validates the caption_data payload on the PATCH /captions/ endpoint."""
 
     caption_data = serializers.ListField(
-        child=serializers.DictField(
-            child=serializers.CharField(allow_blank=True),
-            allow_empty=False,
-        ),
+        child=serializers.DictField(allow_empty=False),
         allow_empty=False,
     )
 

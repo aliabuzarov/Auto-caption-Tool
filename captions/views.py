@@ -16,25 +16,62 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from .models import CaptionJob
-from .serializers import CaptionDataSerializer, CaptionJobSerializer
+from .serializers import CaptionDataSerializer, CaptionJobSerializer, JobListSerializer
 from .tasks import render_video, transcribe_video
 
 
-@api_view(["POST"])
+@api_view(["GET", "POST"])
 @csrf_exempt
 def create_job(request):
     """
-    Upload a video and create a new CaptionJob.
+    GET: List all CaptionJobs (project history).
+    POST: Upload a video and create a new CaptionJob.
 
-    Accepts multipart/form-data with the video file and optional parameters:
-    words_per_line, caption_position, whisper_model_size.
+    POST Accepts multipart/form-data with the video file and optional parameters.
     On success dispatches the transcribe_video Celery task and returns the job id.
     """
+    if request.method == "GET":
+        jobs = CaptionJob.objects.all()
+        serializer = JobListSerializer(jobs, many=True)
+        return Response(serializer.data)
+
     serializer = CaptionJobSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    video_file = request.FILES.get('input_video')
+    if video_file:
+        MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
+        ALLOWED_MIME_TYPES = {'video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm'}
+        
+        if video_file.size > MAX_UPLOAD_SIZE:
+            return Response({'detail': 'File too large. Maximum size is 500MB.'}, status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+        if video_file.content_type not in ALLOWED_MIME_TYPES and not video_file.name.lower().endswith(('.mp4', '.mov', '.avi', '.webm')):
+            return Response({'detail': 'Invalid file type. Only video files are allowed.'}, status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
+
     job = serializer.save()
+
+    if not job.name or job.name == "Untitled Project":
+        job.name = video_file.name if video_file else "Untitled Project"
+        job.save(update_fields=["name"])
+
+    # Extract thumbnail
+    if job.input_video:
+        import subprocess, os
+        from django.core.files import File
+        try:
+            thumb_path = f"/tmp/{job.id}_thumb.jpg"
+            subprocess.run([
+                "ffmpeg", "-y", "-i", job.input_video.path, 
+                "-ss", "00:00:00.000", "-vframes", "1", 
+                "-vf", "scale=320:-1", thumb_path
+            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if os.path.exists(thumb_path):
+                with open(thumb_path, "rb") as f:
+                    job.thumbnail.save(f"thumb_{job.id}.jpg", File(f), save=True)
+                os.remove(thumb_path)
+        except Exception as e:
+            print("Thumbnail extraction failed:", e)
 
     transcribe_video.delay(str(job.id))
 
@@ -44,18 +81,28 @@ def create_job(request):
     )
 
 
-@api_view(["GET"])
+@api_view(["GET", "PATCH", "DELETE"])
+@csrf_exempt
 def get_job(request, pk):
     """
-    Retrieve a CaptionJob by its UUID.
-
-    Returns the job status and, once ready_for_review, includes caption_data
-    for the frontend editor.
+    GET: Retrieve a CaptionJob by its UUID.
+    PATCH: Update job fields (like name).
+    DELETE: Delete a CaptionJob.
     """
     try:
         job = CaptionJob.objects.get(pk=pk)
     except CaptionJob.DoesNotExist:
         raise Http404("CaptionJob not found.")
+
+    if request.method == "DELETE":
+        job.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    elif request.method == "PATCH":
+        serializer = CaptionJobSerializer(job, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     serializer = CaptionJobSerializer(job)
     return Response(serializer.data)
@@ -93,6 +140,33 @@ def update_captions(request, pk):
 
 @api_view(["POST"])
 @csrf_exempt
+def regenerate_job(request, pk):
+    """
+    Regenerate captions for an existing job with new settings.
+    """
+    try:
+        job = CaptionJob.objects.get(pk=pk)
+    except CaptionJob.DoesNotExist:
+        raise Http404("CaptionJob not found.")
+
+    words_per_line = request.data.get("words_per_line")
+    whisper_model_size = request.data.get("whisper_model_size")
+
+    if words_per_line is not None:
+        job.words_per_line = int(words_per_line)
+    if whisper_model_size is not None:
+        job.whisper_model_size = str(whisper_model_size)
+
+    job.status = CaptionJob.Status.PENDING
+    job.save(update_fields=["words_per_line", "whisper_model_size", "status", "updated_at"])
+
+    transcribe_video.delay(str(job.id))
+
+    return Response({"id": str(job.id), "status": job.status})
+
+
+@api_view(["POST"])
+@csrf_exempt
 def render_job(request, pk):
     """
     Trigger the render_video Celery task for a job whose captions are ready.
@@ -120,7 +194,12 @@ def render_job(request, pk):
     job.status = CaptionJob.Status.RENDERING
     job.save(update_fields=["status", "updated_at"])
 
-    render_video.delay(str(job.id))
+    caption_offset = request.data.get("captionOffset", {})
+    offset_y = caption_offset.get("y", 0) if isinstance(caption_offset, dict) else 0
+
+    export_settings = request.data.get("exportSettings", {})
+
+    render_video.delay(str(job.id), int(offset_y), export_settings)
 
     return Response({"id": str(job.id), "status": job.status})
 

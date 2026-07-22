@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { Clip, Caption, CaptionChunk, Track } from '../types';
-import { MediaItem } from '../data';
+import { MediaItem, INITIAL_TRACKS } from '../data';
 
 interface TransformState {
   x: number;
@@ -140,7 +140,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   // Media & Clips
   mediaList: [],
   setMediaList: (updater) => set((state) => ({ mediaList: typeof updater === 'function' ? updater(state.mediaList) : updater })),
-  tracks: [],
+  tracks: INITIAL_TRACKS,
   setTracks: (updater) => set((state) => ({ tracks: typeof updater === 'function' ? updater(state.tracks) : updater })),
   activeMedia: null,
   setActiveMedia: (media) => set({ activeMedia: media }),

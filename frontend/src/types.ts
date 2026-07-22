@@ -20,6 +20,8 @@ export interface Clip {
   textFontSize?: number;
   textBold?: boolean;
   textShowBg?: boolean;
+  isAICaption?: boolean;
+  isCustomText?: boolean;
 }
 
 export interface Track {

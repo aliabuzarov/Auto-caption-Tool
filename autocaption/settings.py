@@ -9,7 +9,7 @@ SECRET_KEY = os.environ.get(
     "django-insecure-change-me-in-production-abc123xyz",
 )
 
-DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() in ("true", "1", "yes")
+DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() in ("true", "1", "yes")
 
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",")
 
@@ -159,7 +159,7 @@ CELERY_TASK_TIME_LIMIT = 60 * 60  # 1 hour max per task (video rendering)
 # ---------------------------------------------------------------------------
 # CORS (permissive for single-user internal tool)
 # ---------------------------------------------------------------------------
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = os.environ.get("CORS_ALLOW_ALL_ORIGINS", "False").lower() in ("true", "1", "yes")
 
 # ---------------------------------------------------------------------------
 # Default primary key field type

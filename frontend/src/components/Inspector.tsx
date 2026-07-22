@@ -397,17 +397,35 @@ export default function Inspector({
                 <span className="text-[9px] text-on-surface-variant/50 ml-1">sec</span>
               </div>
 
-              <div className="bg-surface-container-low rounded-xl p-3 border border-white/[0.04] flex items-center">
-                <span className="text-[10px] text-on-surface-variant mr-3 font-mono">Duration</span>
-                <input
-                  type="number"
-                  value={selectedClip.duration}
-                  onChange={(e) => onUpdateClip?.(selectedClip.id, { duration: Math.max(1, parseFloat(e.target.value) || 0) })}
-                  step="0.5"
-                  min="1"
-                  className="bg-transparent border-none text-[11px] font-mono p-0 w-full focus:ring-0 text-right text-on-surface font-semibold"
-                />
-                <span className="text-[9px] text-on-surface-variant/50 ml-1">sec</span>
+              <div className="bg-surface-container-low rounded-xl p-3 border border-white/[0.04] flex items-center justify-between gap-2">
+                <span className="text-[10px] text-on-surface-variant font-mono shrink-0">Duration</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onUpdateClip?.(selectedClip.id, { duration: Math.max(0.5, selectedClip.duration - 1) })}
+                    className="px-2 py-1 bg-white/[0.05] hover:bg-white/10 rounded text-[9px] font-mono font-bold text-on-surface transition-all cursor-pointer border border-white/[0.06]"
+                    title="Shorten clip duration by 1 sec"
+                  >
+                    -1s
+                  </button>
+                  <input
+                    type="number"
+                    value={selectedClip.duration}
+                    onChange={(e) => onUpdateClip?.(selectedClip.id, { duration: Math.max(0.5, parseFloat(e.target.value) || 0) })}
+                    step="0.5"
+                    min="0.5"
+                    className="bg-transparent border-none text-[11px] font-mono p-0 w-12 focus:ring-0 text-center text-on-surface font-semibold"
+                  />
+                  <span className="text-[9px] text-on-surface-variant/50">sec</span>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateClip?.(selectedClip.id, { duration: selectedClip.duration + 1 })}
+                    className="px-2 py-1 bg-primary/20 hover:bg-primary/30 text-primary rounded text-[9px] font-mono font-bold transition-all cursor-pointer border border-primary/30"
+                    title="Extend clip duration by 1 sec"
+                  >
+                    +1s
+                  </button>
+                </div>
               </div>
             </div>
 

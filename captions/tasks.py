@@ -120,7 +120,7 @@ def transcribe_video(self, job_id: str):
 # render_video
 # ---------------------------------------------------------------------------
 @shared_task(bind=True, max_retries=1)
-def render_video(self, job_id: str):
+def render_video(self, job_id: str, caption_offset_y: int = 0, export_settings: dict = None):
     """
     Generate karaoke-style captions and burn them into the video using ffmpeg.
 
@@ -154,14 +154,15 @@ def render_video(self, job_id: str):
 
         # --- 1. Generate .ass subtitle file -----------------------------------
         try:
-            _generate_ass(caption_data, ass_path, job.caption_position)
+            width, height = _get_video_dimensions(input_path)
+            _generate_ass(caption_data, ass_path, job.caption_position, width, height, caption_offset_y)
         except Exception as exc:
             _fail_job(job, f"ASS generation failed: {exc}")
             return
 
         # --- 2. Burn via ffmpeg -----------------------------------------------
         try:
-            _burn_subtitles(input_path, ass_path, output_tmp)
+            _burn_subtitles(input_path, ass_path, output_tmp, export_settings)
         except subprocess.CalledProcessError as exc:
             _fail_job(job, f"ffmpeg rendering failed: {exc}")
             return
@@ -196,6 +197,21 @@ def _fail_job(job, message: str):
     logger.error("Job %s failed: %s", job.id, message)
 
 
+def _get_video_dimensions(video_path: str) -> tuple[int, int]:
+    """Extract width and height of the video using ffprobe."""
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "csv=s=x:p=0",
+        video_path,
+    ]
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    w, h = result.stdout.strip().split("x")
+    return int(w), int(h)
+
+
 def _extract_audio(video_path: str, audio_path: str):
     """Extract 16 kHz mono WAV audio from a video file using ffmpeg."""
     cmd = [
@@ -227,6 +243,7 @@ def _group_words(words: list[dict], per_line: int) -> list[dict]:
             "text": " ".join(w["text"] for w in group),
             "start": group[0]["start"],
             "end": group[-1]["end"],
+            "words": group,
         })
     return chunks
 
@@ -235,7 +252,7 @@ def _group_words(words: list[dict], per_line: int) -> list[dict]:
 # .ass subtitle generation
 # ---------------------------------------------------------------------------
 
-def _generate_ass(caption_data: list[dict], ass_path: str, position: str):
+def _generate_ass(caption_data: list[dict], ass_path: str, position: str, width: int = 1080, height: int = 1920, caption_offset_y: int = 0):
     """
     Write an Advanced SubStation Alpha (.ass) file with karaoke timing tags.
 
@@ -247,7 +264,7 @@ def _generate_ass(caption_data: list[dict], ass_path: str, position: str):
       - bottom: large top margin pushes text near the bottom
       - top:    small top margin (actually Alignment=8 for top-center)
     """
-    header = _ass_header(position)
+    header = _ass_header(position, width, height, caption_offset_y)
     events = _ass_events(caption_data)
 
     with open(ass_path, "w", encoding="utf-8") as fh:
@@ -256,21 +273,33 @@ def _generate_ass(caption_data: list[dict], ass_path: str, position: str):
         fh.write(events)
 
 
-def _ass_header(position: str) -> str:
+def _ass_header(position: str, width: int, height: int, caption_offset_y: int = 0) -> str:
     """Return the [Script Info] and [V4+ Styles] sections of the .ass file."""
-    alignment = "8" if position == "top" else "2"  # 8=top-center, 2=bottom-center
+    alignment = "8" if position == "top" else "2"  # 2=bottom-center
+    
+    # Substation Alpha MarginV adjusts up from bottom if alignment=2, down from top if alignment=8
+    # caption_offset_y is typically negative when dragged up in the UI, so we adjust accordingly
+    base_margin = 50
+    # Assuming UI drag offset roughly correlates to ASS pixels
+    margin_v = max(0, base_margin - caption_offset_y) 
+    
+    # Dynamic styling for Shorts
+    fontsize = int(width * 0.08)
+    outline = int(width * 0.015)
+    shadow = int(width * 0.01)
+
     return f"""[Script Info]
-Title: AutoCaption Karaoke
+Title: AutoCaption Shorts
 ScriptType: v4.00+
-PlayResX: 640
-PlayResY: 480
+PlayResX: {width}
+PlayResY: {height}
 ScaledBorderAndShadow: yes
-WrapStyle: 0
+WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,24,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,1,{alignment},10,10,30,1
-Style: Highlight,Arial,24,&H00FFFF00,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,1,{alignment},10,10,30,1
+Style: Default,Arial,{fontsize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{outline},{shadow},{alignment},20,20,{margin_v},1
+Style: Highlight,Arial,{fontsize},&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{outline},{shadow},{alignment},20,20,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -289,30 +318,35 @@ def _ass_events(caption_data: list[dict]) -> str:
     for chunk in caption_data:
         start = _seconds_to_ass_time(chunk["start"])
         end = _seconds_to_ass_time(chunk["end"])
-        text_with_karaoke = _build_karaoke_text(chunk["text"], chunk["start"], chunk["end"])
+        chunk_words = chunk.get("words")
+        text_with_karaoke = _build_karaoke_text(chunk["text"], chunk["start"], chunk["end"], chunk_words)
 
         line = f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text_with_karaoke}"
         lines.append(line)
     return "\n".join(lines)
 
 
-def _build_karaoke_text(text: str, chunk_start: float, chunk_end: float) -> str:
+def _build_karaoke_text(text: str, chunk_start: float, chunk_end: float, words_data: list[dict] = None) -> str:
     """
     Wrap each word in {\\kXX} tags where XX is the word's duration in centiseconds.
 
-    Since we don't have per-word timestamps at the chunk level, we estimate
-    each word's duration by distributing the chunk's total duration evenly
-    across the words. The result looks like:
-
-        {\\k50}Hello {\\k40}world
-
-    In practice, for a true per-word effect, word-level timing data from
-    the original Whisper output would be used inside each chunk. This is a
-    reasonable approximation when words are few per chunk.
+    If words_data is provided (and matches the current text), we use exact word-level
+    timing. If it's missing (or the user manually edited the text and changed the word count),
+    we fall back to evenly distributing the chunk's total duration across the words.
     """
     words = text.split()
     if not words or len(words) == 1:
         return text
+
+    if words_data and len(words_data) == len(words):
+        reconstructed = " ".join(w["text"] for w in words_data)
+        if reconstructed == text:
+            parts = []
+            for w in words_data:
+                cs = int(round((w["end"] - w["start"]) * 100))
+                cs = max(1, cs)
+                parts.append(f"{{\\k{cs}}}{w['text']}")
+            return " ".join(parts)
 
     total_cs = int((chunk_end - chunk_start) * 100)
     per_word_cs = max(1, total_cs // len(words))
@@ -335,7 +369,7 @@ def _seconds_to_ass_time(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}.{centisecs:02d}"
 
 
-def _burn_subtitles(input_video: str, ass_file: str, output_video: str):
+def _burn_subtitles(input_video: str, ass_file: str, output_video: str, export_settings: dict = None):
     """
     Burn .ass subtitles into the video using ffmpeg's ass filter.
 
@@ -343,18 +377,40 @@ def _burn_subtitles(input_video: str, ass_file: str, output_video: str):
     path must be absolute (or relative to the working directory –
     we pass it via ffmpeg's -vf flag with proper escaping).
     """
+    export_settings = export_settings or {}
     ass_path = os.path.abspath(ass_file).replace("\\", "/")
     escaped_ass = ass_path.replace(":", "\\:").replace("'", "\\'")
+
+    resolution = export_settings.get("resolution", "original")
+    quality = export_settings.get("quality", "medium")
+
+    # Set video filter
+    vf = f"ass='{escaped_ass}'"
+    if resolution == "1080p":
+        vf += ",scale=-2:1080"
+    elif resolution == "4K":
+        vf += ",scale=-2:2160"
+        
+    # Set quality params
+    crf = "23"
+    preset = "medium"
+    
+    if quality == "low":
+        crf = "28"
+        preset = "fast"
+    elif quality == "high":
+        crf = "18"
+        preset = "slow"
 
     cmd = [
         "ffmpeg",
         "-y",
         "-loglevel", "error",
         "-i", input_video,
-        "-vf", f"ass='{escaped_ass}'",
+        "-vf", vf,
         "-c:v", "libx264",
-        "-preset", "medium",
-        "-crf", "23",
+        "-preset", preset,
+        "-crf", crf,
         "-c:a", "aac",
         "-b:a", "128k",
         output_video,

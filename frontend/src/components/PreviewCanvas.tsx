@@ -101,11 +101,30 @@ export default function PreviewCanvas({
     }
   }, [currentTime, userVideoUrl]);
 
+  useEffect(() => {
+    let animationFrameId: number;
+
+    const loop = () => {
+      if (isPlaying && videoRef.current) {
+        onSeek(videoRef.current.currentTime);
+        animationFrameId = requestAnimationFrame(loop);
+      }
+    };
+
+    if (isPlaying) {
+      animationFrameId = requestAnimationFrame(loop);
+    }
+
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [isPlaying, onSeek]);
+
   const handleVideoTimeUpdate = () => {
     if (videoRef.current) {
-      if (isPlaying) {
-        onSeek(videoRef.current.currentTime);
-      } else {
+      if (!isPlaying) {
         // Just keeping it synced during manual seeks
         if (Math.abs(videoRef.current.currentTime - currentTime) > 0.1) {
           // If we want to strictly sync, we could do it here
@@ -343,7 +362,7 @@ export default function PreviewCanvas({
         )}
 
         {/* Transform Bounds Controls */}
-        {showBoundingBox && (
+        {userVideoUrl && showBoundingBox && (
           <div
             className="absolute z-20 pointer-events-auto"
             style={{
@@ -377,7 +396,7 @@ export default function PreviewCanvas({
 
         {clips.filter((c) => {
           const clipEnd = c.start + c.duration;
-          return c.type === 'text' && c.text && currentTime >= c.start && currentTime <= clipEnd;
+          return c.type === 'text' && Boolean(c.isCustomText) && c.text && currentTime >= c.start && currentTime <= clipEnd;
         }).map((clip) => (
           <div
             key={clip.id}
