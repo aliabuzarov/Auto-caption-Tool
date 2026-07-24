@@ -15,6 +15,8 @@ import {
   Bookmark,
   Move,
   Type,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { VideoTransform, EffectSettings, Caption, CaptionChunk, Clip } from '../types';
 import { MediaItem } from '../data';
@@ -29,7 +31,7 @@ interface PreviewCanvasProps {
   effects: EffectSettings;
   currentTime: number;
   onSeek: (time: number) => void;
-  activeCaptions: Caption[];
+  activeCaptions: CaptionChunk[];
   showCaptions: boolean;
   onSplitClip: () => void;
   onAddMarker: () => void;
@@ -69,17 +71,35 @@ export default function PreviewCanvas({
   captionOffset = { x: 0, y: 0 },
   setCaptionOffset,
 }: PreviewCanvasProps) {
-  const { hasCaptions, activeTab, setActiveTab } = useEditorStore();
+  const { hasCaptions, activeTab, setActiveTab, captionStyle, setSelectedClipId } = useEditorStore();
   const [isMuted, setIsMuted] = useState(false);
-  const [showBoundingBox, setShowBoundingBox] = useState(true);
+  const [showBoundingBox, setShowBoundingBox] = useState(false);
   const [showSafeZones, setShowSafeZones] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [showCaptionEditor, setShowCaptionEditor] = useState(false);
   const [isDraggingCaption, setIsDraggingCaption] = useState(false);
+  const [videoAspectRatio, setVideoAspectRatio] = useState(16 / 9);
+  const [canvasZoom, setCanvasZoom] = useState(100);
   const dragStartRef = useRef({ x: 0, y: 0, initialX: 0, initialY: 0 });
   const dragCaptionStartRef = useRef({ x: 0, y: 0, initialX: 0, initialY: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const { setPreviewDimensions } = useEditorStore();
+
+  useEffect(() => {
+    if (!viewportRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          setPreviewDimensions({ width: Math.round(width), height: Math.round(height) });
+        }
+      }
+    });
+    observer.observe(viewportRef.current);
+    return () => observer.disconnect();
+  }, [setPreviewDimensions]);
 
   const maxTime = videoDuration > 0 ? videoDuration : 60;
 
@@ -100,6 +120,24 @@ export default function PreviewCanvas({
       video.currentTime = currentTime;
     }
   }, [currentTime, userVideoUrl]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const updateRatio = () => {
+      if (video.videoWidth && video.videoHeight) {
+        setVideoAspectRatio(video.videoWidth / video.videoHeight);
+      }
+    };
+
+    if (video.readyState >= 1) {
+      updateRatio();
+    }
+    
+    video.addEventListener('loadedmetadata', updateRatio);
+    return () => video.removeEventListener('loadedmetadata', updateRatio);
+  }, [userVideoUrl]);
 
   useEffect(() => {
     let animationFrameId: number;
@@ -134,8 +172,13 @@ export default function PreviewCanvas({
   };
 
   const handleVideoMetadata = () => {
-    if (videoRef.current && onVideoLoaded) {
-      onVideoLoaded(videoRef.current.duration);
+    if (videoRef.current) {
+      if (onVideoLoaded) {
+        onVideoLoaded(videoRef.current.duration);
+      }
+      if (videoRef.current.videoWidth && videoRef.current.videoHeight) {
+        setVideoAspectRatio(videoRef.current.videoWidth / videoRef.current.videoHeight);
+      }
     }
   };
 
@@ -246,18 +289,37 @@ export default function PreviewCanvas({
 
   return (
     <div
-      className="flex-1 bg-surface-container-lowest border border-white/[0.06] rounded-2xl p-4 flex flex-col relative group overflow-hidden select-none shadow-[inset_0_1px_4px_rgba(255,255,255,0.05)]"
+      className="flex-1 bg-surface-container-lowest border border-white/[0.06] rounded-2xl p-2 flex flex-col relative group overflow-hidden select-none shadow-[inset_0_1px_4px_rgba(255,255,255,0.05)] min-h-0"
       ref={containerRef}
     >
       {/* Header bar */}
-      <div className="flex justify-between items-center mb-3.5 px-1 shrink-0">
+      <div className="flex justify-between items-center mb-1.5 px-0.5 shrink-0">
         <div className="flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
           <span className="text-[10px] font-sans font-bold text-on-surface-variant tracking-wider uppercase">
             Preview{activeMedia ? ` • ${activeMedia.title}` : ''}
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {/* Canvas Zoom Controls */}
+          <div className="flex items-center gap-1 bg-surface-container border border-white/[0.05] rounded p-0.5">
+            <button
+              onClick={() => setCanvasZoom(Math.max(25, canvasZoom - 25))}
+              className="p-1 text-on-surface-variant hover:text-white transition-colors cursor-pointer"
+              title="Zoom Out Canvas"
+            >
+              <ZoomOut className="w-3 h-3" />
+            </button>
+            <span className="text-[9px] font-mono text-on-surface-variant w-8 text-center uppercase tracking-wider">{canvasZoom}%</span>
+            <button
+              onClick={() => setCanvasZoom(Math.min(400, canvasZoom + 25))}
+              className="p-1 text-on-surface-variant hover:text-white transition-colors cursor-pointer"
+              title="Zoom In Canvas"
+            >
+              <ZoomIn className="w-3 h-3" />
+            </button>
+          </div>
+          
           {editingCaptions && editingCaptions.length > 0 && (
             <button
               onClick={() => setShowCaptionEditor(!showCaptionEditor)}
@@ -294,8 +356,24 @@ export default function PreviewCanvas({
         </div>
       </div>
 
-      {/* Video Viewport Stage */}
-      <div className="flex-1 bg-neutral-950 rounded-xl relative overflow-hidden flex items-center justify-center border border-white/[0.04]">
+      {/* Video Viewport Stage Wrapper */}
+      <div className="flex-1 w-full relative min-h-0 overflow-hidden bg-transparent">
+        <div 
+          className="absolute inset-0 flex items-center justify-center p-2 transition-transform duration-300 origin-center"
+          style={{ transform: `scale(${canvasZoom / 100})` }}
+        >
+          {/* Video Viewport Stage (Constrained Aspect Ratio) */}
+          <div 
+            ref={viewportRef}
+            className="@container bg-neutral-950 rounded-xl relative overflow-hidden flex items-center justify-center border border-white/[0.04] shadow-lg transition-all duration-300"
+            style={{
+              aspectRatio: userVideoUrl ? videoAspectRatio : 16/9,
+              height: (userVideoUrl && videoAspectRatio < 1) ? '100%' : 'auto',
+              width: (!userVideoUrl || videoAspectRatio >= 1) ? '100%' : 'auto',
+              maxHeight: '100%',
+              maxWidth: '100%',
+            }}
+          >
         {userVideoUrl ? (
           <video
             ref={videoRef}
@@ -304,6 +382,11 @@ export default function PreviewCanvas({
             muted={isMuted}
             onTimeUpdate={handleVideoTimeUpdate}
             onLoadedMetadata={handleVideoMetadata}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowBoundingBox(true);
+              setSelectedClipId('video-main');
+            }}
             style={{
               filter: getFilterCSS(),
               transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale / 100}) rotate(${transform.rotation}deg)`,
@@ -361,13 +444,24 @@ export default function PreviewCanvas({
           </div>
         )}
 
+        {/* Click-away overlay to unselect Transform Box */}
+        {userVideoUrl && showBoundingBox && (
+          <div 
+            className="absolute inset-0 z-10"
+            onMouseDown={() => {
+              setShowBoundingBox(false);
+              setSelectedClipId(null);
+            }}
+          />
+        )}
+
         {/* Transform Bounds Controls */}
         {userVideoUrl && showBoundingBox && (
           <div
             className="absolute z-20 pointer-events-auto"
             style={{
-              width: '280px',
-              height: '140px',
+              width: '100%',
+              height: '100%',
               transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale / 100}) rotate(${transform.rotation}deg)`,
             }}
           >
@@ -400,7 +494,8 @@ export default function PreviewCanvas({
         }).map((clip) => (
           <div
             key={clip.id}
-            className="absolute inset-x-0 top-1/2 -translate-y-1/2 text-center pointer-events-none z-30 transition-all duration-150"
+            className="absolute w-[90%] left-1/2 top-1/2 -translate-y-1/2 text-center pointer-events-none z-30 transition-all duration-150"
+            style={{ transform: 'translate(-50%, -50%)' }}
           >
             <span className="inline-block tracking-wide"
               style={{
@@ -421,21 +516,53 @@ export default function PreviewCanvas({
 
         {showCaptions && activeCaption && (
           <div 
-            className="absolute bottom-6 inset-x-8 text-center z-30 transition-none"
-            style={{ transform: `translate(${captionOffset.x}px, ${captionOffset.y}px)` }}
+            className="absolute bottom-6 w-[90%] left-1/2 text-center z-30 transition-none"
+            style={{ transform: `translate(calc(-50% + ${captionOffset.x}px), ${captionOffset.y}px)` }}
           >
             <span 
               onMouseDown={handleCaptionMouseDown}
-              className="bg-black/90 text-primary border border-primary/25 text-xs font-sans font-semibold tracking-wider py-1.5 px-3.5 rounded-lg inline-block shadow-lg cursor-move hover:scale-105 hover:border-primary/60 transition-all select-none"
+              className="inline-block shadow-lg cursor-move hover:scale-105 hover:ring-2 hover:ring-primary/60 transition-all select-none"
+              style={{
+                fontFamily: `"${captionStyle.fontFamily}", system-ui, sans-serif`,
+                fontSize: `calc(8cqw * ${captionStyle.fontSizeScale / 100})`,
+                fontWeight: 'bold',
+                backgroundColor: `rgba(0, 0, 0, ${captionStyle.bgOpacity / 100})`,
+                border: 'none',
+                padding: '1.5cqw 3cqw',
+                borderRadius: '1.5cqw',
+                letterSpacing: '0.05em',
+              }}
             >
-              {activeCaption.text}
+              {activeCaption.words && activeCaption.words.length > 0 ? (
+                activeCaption.words.map((word, i) => {
+                  const isSpoken = currentTime >= word.start;
+                  return (
+                    <span
+                      key={i}
+                      style={{
+                        color: isSpoken ? captionStyle.highlightColor : captionStyle.primaryColor,
+                        textShadow: '0 2px 4px rgba(0,0,0,0.8)',
+                        transition: 'color 0.1s ease',
+                      }}
+                    >
+                      {word.text}{' '}
+                    </span>
+                  );
+                })
+              ) : (
+                <span style={{ color: captionStyle.primaryColor, textShadow: '0 2px 4px rgba(0,0,0,0.8)' }}>
+                  {activeCaption.text}
+                </span>
+              )}
             </span>
           </div>
         )}
+          </div>
+        </div>
       </div>
 
       {/* Playback Controls Bar */}
-      <div className="shrink-0 mt-3 bg-surface-container-low border border-white/[0.06] rounded-xl px-5 py-2.5 flex items-center justify-between gap-4">
+      <div className="shrink-0 mt-2 bg-surface-container-low border border-white/[0.06] rounded-xl px-3 py-1.5 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <button
             onClick={() => onSeek(Math.max(0, currentTime - 10))}
@@ -446,7 +573,7 @@ export default function PreviewCanvas({
           </button>
           <button
             onClick={onTogglePlay}
-            className="w-10 h-10 rounded-full bg-primary text-background-dark flex items-center justify-center hover:bg-white transition-all shadow-[0_0_10px_rgba(173,198,255,0.2)] hover:scale-105 cursor-pointer"
+            className="w-8 h-8 rounded-full bg-primary text-background-dark flex items-center justify-center hover:bg-white transition-all shadow-[0_0_10px_rgba(173,198,255,0.2)] hover:scale-105 cursor-pointer"
             title={isPlaying ? 'Pause' : 'Play'}
           >
             {isPlaying ? (

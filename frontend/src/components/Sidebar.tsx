@@ -35,13 +35,15 @@ interface SidebarProps {
   onSelectLUT: (lutId: any) => void;
   activeLUT: string;
   onRunAICaptions: () => void;
+  onCancelAICaptions?: () => void;
   isGeneratingCaptions: boolean;
   hasCaptions: boolean;
-  onImportFile: (item: any) => void;
+  onImportFile: (item: MediaItem) => void;
   onVideoFileSelected: (file: File) => void;
-  jobStatus?: string | null;
+  jobStatus: string | null;
   wordsPerLine: number;
   setWordsPerLine: (val: number) => void;
+  width?: number;
 }
 
 export default function Sidebar({
@@ -55,6 +57,7 @@ export default function Sidebar({
   onSelectLUT,
   activeLUT,
   onRunAICaptions,
+  onCancelAICaptions,
   isGeneratingCaptions,
   hasCaptions,
   onImportFile,
@@ -62,8 +65,9 @@ export default function Sidebar({
   jobStatus,
   wordsPerLine,
   setWordsPerLine,
+  width = 320,
 }: SidebarProps) {
-  const { uploadProgress } = useEditorStore();
+  const { uploadProgress, captionStyle, setCaptionStyle } = useEditorStore();
   const [dragActive, setDragActive] = useState(false);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -150,9 +154,12 @@ export default function Sidebar({
   const videoItems = mediaList.filter(m => m.category === 'video');
 
   return (
-    <div className="w-[320px] shrink-0 bg-surface border border-white/[0.06] rounded-2xl flex overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)] select-none">
+    <div 
+      className="shrink-0 bg-surface border border-white/[0.06] rounded-2xl flex overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)] select-none transition-none"
+      style={{ width: `${width}px` }}
+    >
       {/* Icon list (Left vertical bar) */}
-      <div className="w-16 bg-surface-container-lowest border-r border-white/[0.04] flex flex-col items-center py-4 gap-4">
+      <div className="w-14 bg-surface-container-lowest border-r border-white/[0.04] flex flex-col items-center py-2 gap-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -160,7 +167,7 @@ export default function Sidebar({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center relative transition-all group cursor-pointer ${
+              className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center relative transition-all group cursor-pointer ${
                 isActive
                   ? 'bg-primary/10 text-primary border border-primary/20'
                   : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-white/[0.04]'
@@ -521,34 +528,127 @@ export default function Sidebar({
                   </p>
                 </div>
 
-                <button
-                  disabled={isGeneratingCaptions}
-                  onClick={onRunAICaptions}
-                  className={`w-full py-2 rounded-lg text-[10px] font-sans font-bold tracking-wider uppercase transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                    isGeneratingCaptions
-                      ? 'bg-white/[0.04] text-on-surface-variant/50 cursor-not-allowed border border-white/[0.04]'
-                      : hasCaptions
-                      ? 'bg-secondary/10 text-secondary hover:bg-secondary/20 border border-secondary/20'
-                      : 'bg-primary text-background-dark hover:shadow-[0_0_12px_rgba(173,198,255,0.25)] hover:bg-white'
-                  }`}
-                >
-                  {isGeneratingCaptions ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-on-surface-variant/40 border-t-on-surface-variant rounded-full animate-spin"></div>
-                      <span>{jobStatus === 'transcribing' ? 'Transcribing...' : 'Uploading...'}</span>
-                    </>
-                  ) : hasCaptions ? (
-                    <>
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Regenerate Captions</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Generate Captions</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </>
+                {/* Advanced Styling */}
+                <div className="mb-4 bg-white/[0.02] p-3 rounded-lg border border-white/[0.04] space-y-3">
+                  <h5 className="text-[10px] font-sans font-bold uppercase tracking-wider text-on-surface/90">
+                    Caption Styling
+                  </h5>
+                  
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] uppercase tracking-wider text-on-surface-variant/70">Font Family</label>
+                    <select
+                      value={captionStyle.fontFamily}
+                      onChange={(e) => setCaptionStyle({ ...captionStyle, fontFamily: e.target.value })}
+                      className="w-full bg-surface-container-highest border border-white/[0.06] text-[10px] text-on-surface rounded p-1.5 outline-none focus:border-primary/50"
+                    >
+                      <option value="Arial">Arial</option>
+                      <option value="Impact">Impact</option>
+                      <option value="Roboto">Roboto</option>
+                      <option value="Comic Sans MS">Comic Sans MS</option>
+                      <option value="Courier New">Courier New</option>
+                      <option value="Times New Roman">Times New Roman</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between">
+                      <label className="text-[9px] uppercase tracking-wider text-on-surface-variant/70">Size Scale</label>
+                      <span className="text-[9px] text-primary">{captionStyle.fontSizeScale}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="50"
+                      max="200"
+                      step="5"
+                      value={captionStyle.fontSizeScale}
+                      onChange={(e) => setCaptionStyle({ ...captionStyle, fontSizeScale: parseInt(e.target.value) })}
+                      className="w-full h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary"
+                    />
+                  </div>
+
+                  <div className="flex gap-2">
+                    <div className="flex-1 space-y-1.5">
+                      <label className="text-[9px] uppercase tracking-wider text-on-surface-variant/70 truncate block">Text Color</label>
+                      <div className="flex items-center gap-2 bg-surface-container-highest border border-white/[0.06] p-1 rounded">
+                        <input
+                          type="color"
+                          value={captionStyle.primaryColor}
+                          onChange={(e) => setCaptionStyle({ ...captionStyle, primaryColor: e.target.value })}
+                          className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent p-0"
+                        />
+                        <span className="text-[9px] font-mono text-on-surface-variant uppercase">{captionStyle.primaryColor}</span>
+                      </div>
+                    </div>
+                    <div className="flex-1 space-y-1.5">
+                      <label className="text-[9px] uppercase tracking-wider text-on-surface-variant/70 truncate block">Highlight Color</label>
+                      <div className="flex items-center gap-2 bg-surface-container-highest border border-white/[0.06] p-1 rounded">
+                        <input
+                          type="color"
+                          value={captionStyle.highlightColor}
+                          onChange={(e) => setCaptionStyle({ ...captionStyle, highlightColor: e.target.value })}
+                          className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent p-0"
+                        />
+                        <span className="text-[9px] font-mono text-on-surface-variant uppercase">{captionStyle.highlightColor}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between">
+                      <label className="text-[9px] uppercase tracking-wider text-on-surface-variant/70">Background Opacity</label>
+                      <span className="text-[9px] text-primary">{captionStyle.bgOpacity}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="5"
+                      value={captionStyle.bgOpacity}
+                      onChange={(e) => setCaptionStyle({ ...captionStyle, bgOpacity: parseInt(e.target.value) })}
+                      className="w-full h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    disabled={isGeneratingCaptions}
+                    onClick={onRunAICaptions}
+                    className={`flex-1 py-2 rounded-lg text-[10px] font-sans font-bold tracking-wider uppercase transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      isGeneratingCaptions
+                        ? 'bg-white/[0.04] text-on-surface-variant/50 cursor-not-allowed border border-white/[0.04]'
+                        : hasCaptions
+                        ? 'bg-secondary/10 text-secondary hover:bg-secondary/20 border border-secondary/20'
+                        : 'bg-primary text-background-dark hover:shadow-[0_0_12px_rgba(173,198,255,0.25)] hover:bg-white'
+                    }`}
+                  >
+                    {isGeneratingCaptions ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-on-surface-variant/40 border-t-on-surface-variant rounded-full animate-spin"></div>
+                        <span>{jobStatus === 'transcribing' ? 'Transcribing...' : 'Uploading...'}</span>
+                      </>
+                    ) : hasCaptions ? (
+                      <>
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Regenerate Captions</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Generate Captions</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </>
+                    )}
+                  </button>
+                  {isGeneratingCaptions && onCancelAICaptions && (
+                    <button
+                      onClick={onCancelAICaptions}
+                      className="px-3 py-2 rounded-lg text-error bg-error/10 hover:bg-error/20 border border-error/20 flex items-center justify-center transition-all cursor-pointer"
+                      title="Cancel Transcription"
+                    >
+                      <RotateCcw className="w-4 h-4 rotate-45" />
+                    </button>
                   )}
-                </button>
+                </div>
               </div>
             </div>
           )}

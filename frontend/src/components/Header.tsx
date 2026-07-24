@@ -31,18 +31,18 @@ export default function Header() {
   };
 
   return (
-    <header className="bg-surface/75 backdrop-blur-xl border border-white/[0.06] rounded-2xl p-4 flex justify-between items-center w-full max-w-7xl mx-auto z-40 shrink-0 select-none shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+    <header className="bg-surface/75 backdrop-blur-xl border border-white/[0.06] rounded-2xl p-2 px-4 flex justify-between items-center w-full max-w-7xl mx-auto z-40 shrink-0 select-none shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
       {/* Brand / Project Info */}
       <div className="flex items-center gap-4">
         <button
           onClick={() => setViewMode('dashboard')}
-          className="w-10 h-10 rounded-xl bg-surface-container-high border border-white/[0.08] flex items-center justify-center hover:bg-white/[0.05] transition-all cursor-pointer group"
+          className="w-8 h-8 rounded-xl bg-surface-container-high border border-white/[0.08] flex items-center justify-center hover:bg-white/[0.05] transition-all cursor-pointer group"
           title="Back to Dashboard"
         >
-          <ArrowLeft className="w-5 h-5 text-on-surface-variant group-hover:text-primary transition-colors" />
+          <ArrowLeft className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors" />
         </button>
-        <div className="w-10 h-10 rounded-xl bg-surface-container-high border border-white/[0.08] flex items-center justify-center shadow-inner group">
-          <Film className="w-5 h-5 text-primary group-hover:scale-110 transition-transform duration-200" />
+        <div className="w-8 h-8 rounded-xl bg-surface-container-high border border-white/[0.08] flex items-center justify-center shadow-inner group">
+          <Film className="w-4 h-4 text-primary group-hover:scale-110 transition-transform duration-200" />
         </div>
         <div>
           {isEditing ? (

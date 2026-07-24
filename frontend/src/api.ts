@@ -27,6 +27,7 @@ interface JobResponse {
   words_per_line?: number;
   caption_position?: string;
   whisper_model_size?: string;
+  edit_token?: string;
 }
 
 export interface JobListResponse {
@@ -46,6 +47,12 @@ interface CreateJobParams {
   wordsPerLine?: number;
   captionPosition?: string;
   whisperModelSize?: string;
+}
+
+function getHeaders(token?: string): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['X-Edit-Token'] = token;
+  return headers;
 }
 
 /** POST /api/jobs/ – upload a video and start transcription. */
@@ -95,10 +102,10 @@ export function createJob(
 }
 
 /** PATCH /api/jobs/<id>/ – update project name */
-export async function updateProject(jobId: string, name: string): Promise<JobResponse> {
+export async function updateProject(jobId: string, name: string, token?: string): Promise<JobResponse> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}/`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getHeaders(token),
     body: JSON.stringify({ name }),
   });
   if (!res.ok) throw new Error('Failed to update project');
@@ -106,8 +113,11 @@ export async function updateProject(jobId: string, name: string): Promise<JobRes
 }
 
 /** DELETE /api/jobs/<id>/ – delete project */
-export async function deleteProject(jobId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/jobs/${jobId}/`, { method: 'DELETE' });
+export async function deleteProject(jobId: string, token?: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/`, { 
+    method: 'DELETE',
+    headers: token ? { 'X-Edit-Token': token } : undefined
+  });
   if (!res.ok) throw new Error('Failed to delete project');
 }
 
@@ -128,10 +138,10 @@ export async function getJob(jobId: string): Promise<JobResponse> {
 }
 
 /** PATCH /api/jobs/<id>/captions/ – save user-edited caption_data. */
-export async function updateCaptions(jobId: string, captionData: CaptionChunk[]): Promise<JobResponse> {
+export async function updateCaptions(jobId: string, captionData: CaptionChunk[], token?: string): Promise<JobResponse> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}/captions/`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getHeaders(token),
     body: JSON.stringify({ caption_data: captionData }),
   });
 
@@ -146,13 +156,16 @@ export async function updateCaptions(jobId: string, captionData: CaptionChunk[])
 /** POST /api/jobs/<id>/render/ – trigger caption burning / rendering. */
 export async function renderJob(
   jobId: string,
+  previewDimensions?: { width: number; height: number },
   captionOffset?: { x: number; y: number },
-  exportSettings?: { resolution: string; quality: string }
+  exportSettings?: { resolution: string; quality: string },
+  captionStyle?: import('./types').CaptionStyle,
+  token?: string
 ): Promise<JobResponse> {
-  const body = JSON.stringify({ captionOffset, exportSettings });
+  const body = JSON.stringify({ previewDimensions, captionOffset, exportSettings, captionStyle });
   const res = await fetch(`${API_BASE}/jobs/${jobId}/render/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getHeaders(token),
     body,
   });
 
@@ -165,10 +178,10 @@ export async function renderJob(
 }
 
 /** POST /api/jobs/<id>/regenerate/ – regenerate captions with new settings */
-export async function regenerateJob(jobId: string, wordsPerLine: number, whisperModelSize: string): Promise<JobResponse> {
+export async function regenerateJob(jobId: string, wordsPerLine: number, whisperModelSize: string, token?: string): Promise<JobResponse> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}/regenerate/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getHeaders(token),
     body: JSON.stringify({ words_per_line: wordsPerLine, whisper_model_size: whisperModelSize }),
   });
   if (!res.ok) {
@@ -176,6 +189,35 @@ export async function regenerateJob(jobId: string, wordsPerLine: number, whisper
     throw new Error(err.detail || `Failed to regenerate (${res.status})`);
   }
   return res.json();
+}
+
+/** PATCH /api/jobs/<id>/settings/ – autosave settings */
+export async function updateSettings(
+  jobId: string, 
+  captionData?: CaptionChunk[], 
+  captionOffset?: { x: number; y: number }, 
+  captionStyle?: import('./types').CaptionStyle, 
+  token?: string
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/settings/`, {
+    method: 'PATCH',
+    headers: getHeaders(token),
+    body: JSON.stringify({ caption_data: captionData, caption_offset: captionOffset, caption_style: captionStyle }),
+  });
+  if (!res.ok) {
+    throw new Error('Failed to save settings');
+  }
+}
+
+/** POST /api/jobs/<id>/cancel/ – cancel a pending/transcribing job */
+export async function cancelJob(jobId: string, token?: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/cancel/`, {
+    method: 'POST',
+    headers: token ? { 'X-Edit-Token': token } : undefined
+  });
+  if (!res.ok) {
+    throw new Error('Failed to cancel job');
+  }
 }
 
 /** GET /api/jobs/<id>/download/ – returns a Blob of the rendered video. */

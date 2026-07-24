@@ -120,7 +120,7 @@ def transcribe_video(self, job_id: str):
 # render_video
 # ---------------------------------------------------------------------------
 @shared_task(bind=True, max_retries=1)
-def render_video(self, job_id: str, caption_offset_y: int = 0, export_settings: dict = None):
+def render_video(self, job_id: str, offset_x: int = 0, offset_y: int = 0, preview_width: int = 0, preview_height: int = 0, export_settings: dict = None, caption_style: dict = None):
     """
     Generate karaoke-style captions and burn them into the video using ffmpeg.
 
@@ -155,7 +155,7 @@ def render_video(self, job_id: str, caption_offset_y: int = 0, export_settings: 
         # --- 1. Generate .ass subtitle file -----------------------------------
         try:
             width, height = _get_video_dimensions(input_path)
-            _generate_ass(caption_data, ass_path, job.caption_position, width, height, caption_offset_y)
+            _generate_ass(caption_data, ass_path, job.caption_position, width, height, offset_x, offset_y, preview_width, preview_height, caption_style)
         except Exception as exc:
             _fail_job(job, f"ASS generation failed: {exc}")
             return
@@ -175,7 +175,8 @@ def render_video(self, job_id: str, caption_offset_y: int = 0, export_settings: 
         # Move (or copy on Windows) the temp file to the media output directory.
         if os.path.isfile(final_path):
             os.remove(final_path)
-        os.rename(output_tmp, final_path)
+        import shutil
+        shutil.move(output_tmp, final_path)
 
         job.output_video.name = f"output/{output_filename}"
         job.status = CaptionJob.Status.DONE
@@ -252,7 +253,7 @@ def _group_words(words: list[dict], per_line: int) -> list[dict]:
 # .ass subtitle generation
 # ---------------------------------------------------------------------------
 
-def _generate_ass(caption_data: list[dict], ass_path: str, position: str, width: int = 1080, height: int = 1920, caption_offset_y: int = 0):
+def _generate_ass(caption_data: list[dict], ass_path: str, position: str, width: int = 1080, height: int = 1920, offset_x: int = 0, offset_y: int = 0, preview_width: int = 0, preview_height: int = 0, caption_style: dict = None):
     """
     Write an Advanced SubStation Alpha (.ass) file with karaoke timing tags.
 
@@ -264,7 +265,7 @@ def _generate_ass(caption_data: list[dict], ass_path: str, position: str, width:
       - bottom: large top margin pushes text near the bottom
       - top:    small top margin (actually Alignment=8 for top-center)
     """
-    header = _ass_header(position, width, height, caption_offset_y)
+    header = _ass_header(position, width, height, offset_x, offset_y, preview_width, preview_height, caption_style)
     events = _ass_events(caption_data)
 
     with open(ass_path, "w", encoding="utf-8") as fh:
@@ -273,20 +274,53 @@ def _generate_ass(caption_data: list[dict], ass_path: str, position: str, width:
         fh.write(events)
 
 
-def _ass_header(position: str, width: int, height: int, caption_offset_y: int = 0) -> str:
+def _hex_to_ass_color(hex_str: str) -> str:
+    """Convert #RRGGBB to ASS format &H00BBGGRR"""
+    hex_str = hex_str.lstrip("#")
+    if len(hex_str) == 6:
+        r, g, b = hex_str[0:2], hex_str[2:4], hex_str[4:6]
+        return f"&H00{b}{g}{r}"
+    return "&H00FFFFFF"
+
+def _hex_to_ass_alpha(opacity: int) -> str:
+    """Convert opacity % (0-100) to ASS hex alpha (00 to FF, where FF is transparent)"""
+    alpha_val = int(255 * (1 - opacity / 100.0))
+    return f"{alpha_val:02X}"
+
+def _ass_header(position: str, width: int, height: int, offset_x: int = 0, offset_y: int = 0, preview_width: int = 0, preview_height: int = 0, caption_style: dict = None) -> str:
     """Return the [Script Info] and [V4+ Styles] sections of the .ass file."""
     alignment = "8" if position == "top" else "2"  # 2=bottom-center
     
+    scale_y = height / preview_height if preview_height > 0 else 1.0
+    scale_x = width / preview_width if preview_width > 0 else 1.0
+
+    scaled_offset_y = int(offset_y * scale_y)
+    scaled_offset_x = int(offset_x * scale_x)
+
     # Substation Alpha MarginV adjusts up from bottom if alignment=2, down from top if alignment=8
-    # caption_offset_y is typically negative when dragged up in the UI, so we adjust accordingly
     base_margin = 50
-    # Assuming UI drag offset roughly correlates to ASS pixels
-    margin_v = max(0, base_margin - caption_offset_y) 
+    margin_v = max(0, base_margin - scaled_offset_y)
+    margin_l = max(0, 20 + scaled_offset_x)
+    margin_r = max(0, 20 - scaled_offset_x)
     
+    # Default styling from dictionary or fallbacks
+    caption_style = caption_style or {}
+    font_family = caption_style.get("fontFamily", "Arial")
+    size_scale = caption_style.get("fontSizeScale", 100) / 100.0
+    primary_color = _hex_to_ass_color(caption_style.get("primaryColor", "#FFFFFF"))
+    highlight_color = _hex_to_ass_color(caption_style.get("highlightColor", "#FFFF00"))
+    bg_alpha = _hex_to_ass_alpha(caption_style.get("bgOpacity", 85))
+    
+    # ASS colors: Primary, Secondary, Outline, Background (shadow/box)
+    ass_primary = primary_color
+    ass_highlight = highlight_color
+    ass_outline = "&H00000000"
+    ass_bg = f"&H{bg_alpha}000000"
+
     # Dynamic styling for Shorts
-    fontsize = int(width * 0.08)
-    outline = int(width * 0.015)
-    shadow = int(width * 0.01)
+    fontsize = int(width * 0.08 * size_scale)
+    outline = int(width * 0.015 * size_scale)
+    shadow = int(width * 0.01 * size_scale)
 
     return f"""[Script Info]
 Title: AutoCaption Shorts
@@ -298,8 +332,8 @@ WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,{fontsize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{outline},{shadow},{alignment},20,20,{margin_v},1
-Style: Highlight,Arial,{fontsize},&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{outline},{shadow},{alignment},20,20,{margin_v},1
+Style: Default,{font_family},{fontsize},{ass_primary},&H000000FF,{ass_outline},{ass_bg},-1,0,0,0,100,100,0,0,1,{outline},{shadow},{alignment},{margin_l},{margin_r},{margin_v},1
+Style: Highlight,{font_family},{fontsize},{ass_highlight},&H000000FF,{ass_outline},{ass_bg},-1,0,0,0,100,100,0,0,1,{outline},{shadow},{alignment},{margin_l},{margin_r},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

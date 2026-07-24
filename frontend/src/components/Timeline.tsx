@@ -57,6 +57,9 @@ export default function Timeline({
   totalDuration,
 }: TimelineProps) {
   const rulerRef = useRef<HTMLDivElement>(null);
+  const timelineContainerRef = useRef<HTMLDivElement>(null);
+  const headersContainerRef = useRef<HTMLDivElement>(null);
+  const [trackHeight, setTrackHeight] = useState<number>(48);
 
   const timeToPercent = (time: number) => {
     if (totalDuration <= 0) return 0;
@@ -150,12 +153,21 @@ export default function Timeline({
   if (tickMarks[tickMarks.length - 1] < totalDuration) {
     tickMarks.push(Math.ceil(totalDuration / tickInterval) * tickInterval);
   }
+  
+  // Synchronize scrolling between headers and timeline lanes
+  const handleTimelineScroll = () => {
+    if (timelineContainerRef.current && headersContainerRef.current) {
+      headersContainerRef.current.scrollTop = timelineContainerRef.current.scrollTop;
+    }
+  };
 
   return (
-    <div className="bg-surface border border-white/[0.06] rounded-2xl flex flex-col h-64 overflow-hidden select-none shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+    <div 
+      className="h-full bg-surface border border-white/[0.06] rounded-2xl flex flex-col relative overflow-hidden shadow-[inset_0_1px_4px_rgba(255,255,255,0.05)] select-none z-20 transition-none"
+    >
       {/* Timeline Controls / Toolbar */}
-      <div className="h-10 bg-surface-container-lowest border-b border-white/[0.04] px-4 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="h-8 bg-surface-container-lowest border-b border-white/[0.04] px-3 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
           <button
             onClick={onToggleSnap}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[9px] font-sans font-bold uppercase tracking-wider border transition-all cursor-pointer ${
@@ -205,22 +217,39 @@ export default function Timeline({
           </span>
           <button
             onClick={() => setZoom(Math.min(2000, zoom >= 200 ? zoom + 100 : zoom + 25))}
-            className="w-6 h-6 rounded bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-white/[0.06] transition-colors cursor-pointer"
-            title="Zoom In"
+            className="w-6 h-6 rounded bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-white/[0.06] transition-colors cursor-pointer mr-2"
+            title="Zoom In (Horizontal)"
           >
             <ZoomIn className="w-3.5 h-3.5" />
           </button>
+          
+          {/* Vertical Zoom (Track Height) */}
+          <div className="w-[1px] h-4 bg-white/10 mx-1"></div>
+          <input
+            type="range"
+            min="32"
+            max="120"
+            step="4"
+            value={trackHeight}
+            onChange={(e) => setTrackHeight(Number(e.target.value))}
+            className="w-16 h-1.5 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary"
+            title="Drag slider to adjust track height"
+          />
         </div>
       </div>
 
       {/* Main timeline core view container (Ruler + Lanes) */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Track controls headers column */}
-        <div className="w-[140px] shrink-0 bg-surface-container-lowest border-r border-white/[0.04] flex flex-col pt-8">
+        <div 
+          ref={headersContainerRef}
+          className="w-[140px] shrink-0 bg-surface-container-lowest border-r border-white/[0.04] flex flex-col pt-6 overflow-hidden"
+        >
           {tracks.map((track) => (
             <div
               key={track.id}
-              className="h-12 border-b border-white/[0.03] px-3 flex flex-col justify-center"
+              className="border-b border-white/[0.03] px-3 flex flex-col justify-center shrink-0 transition-all duration-300"
+              style={{ height: `${trackHeight}px` }}
             >
               <div className="flex justify-between items-center">
                 <span className="text-[10px] font-sans font-bold text-on-surface uppercase tracking-wide truncate max-w-[70px]">
@@ -253,7 +282,9 @@ export default function Timeline({
 
         {/* Right Scrollable timeline area */}
         <div 
-          className="flex-1 flex flex-col overflow-x-auto overflow-y-hidden relative group/scroller"
+          ref={timelineContainerRef}
+          onScroll={handleTimelineScroll}
+          className="flex-1 flex flex-col overflow-x-auto overflow-y-auto relative group/scroller"
           onWheel={(e) => {
             // Support both vertical two-finger swipe and pinch-to-zoom (ctrlKey)
             if (Math.abs(e.deltaY) > Math.abs(e.deltaX) || e.ctrlKey) {
@@ -273,7 +304,7 @@ export default function Timeline({
           <div
             ref={rulerRef}
             onClick={handleRulerClick}
-            className="h-8 border-b border-white/[0.05] relative bg-surface-container/20 cursor-ew-resize select-none shrink-0"
+            className="h-6 border-b border-white/[0.05] relative bg-surface-container/20 cursor-ew-resize select-none shrink-0"
             style={{ width: `${zoom}%`, minWidth: '100%' }}
           >
             <div className="absolute inset-0 flex justify-between px-4 items-end pb-1.5 pointer-events-none">
@@ -311,7 +342,7 @@ export default function Timeline({
 
           {/* Timeline Tracks Clips Lanes container */}
           <div
-            className="flex-1 relative flex flex-col"
+            className="flex-1 relative flex flex-col min-h-full"
             style={{ width: `${zoom}%`, minWidth: '100%' }}
           >
             {/* Grid ticks vertical background */}
@@ -328,9 +359,10 @@ export default function Timeline({
               return (
                 <div
                   key={track.id}
-                  className={`h-12 border-b border-white/[0.03] relative flex items-center transition-colors ${
+                  className={`border-b border-white/[0.03] relative flex items-center transition-all duration-300 ${
                     isLocked ? 'bg-black/10' : 'bg-surface/10 hover:bg-white/[0.01]'
                   }`}
+                  style={{ height: `${trackHeight}px` }}
                 >
                   {laneClips.map((clip) => {
                     const isSelected = selectedClipId === clip.id;
@@ -352,7 +384,7 @@ export default function Timeline({
                             onSelectClip(clip.id);
                           }
                         }}
-                        className={`absolute h-9.5 rounded-lg border flex flex-col justify-between p-1.5 overflow-hidden transition-all select-none cursor-pointer group ${
+                        className={`absolute h-[80%] top-[10%] rounded-lg border flex flex-col justify-center p-1.5 overflow-hidden transition-all select-none cursor-pointer group ${
                           isSelected
                             ? 'border-primary ring-1 ring-primary/20 shadow-lg shadow-primary/5 bg-gradient-to-r from-surface-container-high to-surface-container-highest'
                             : 'border-white/10 hover:border-white/25 bg-gradient-to-r from-surface-container-low to-surface-container'
@@ -368,11 +400,17 @@ export default function Timeline({
                             {clip.type === 'audio' && <Music className="w-3 h-3 text-primary shrink-0" />}
                             {clip.type === 'text' && <Type className="w-3 h-3 text-tertiary shrink-0" />}
                             {clip.type === 'effect' && <Sparkles className="w-3 h-3 text-accent shrink-0" />}
-                            <span className="text-[9.5px] font-sans font-bold text-white/95 uppercase truncate">
+                            <span 
+                              className="font-sans font-bold text-white/95 uppercase truncate"
+                              style={{ fontSize: `${Math.max(9.5, Math.min(16, trackHeight * 0.22))}px` }}
+                            >
                               {clip.title}
                             </span>
                           </div>
-                          <span className="text-[7.5px] font-mono text-on-surface-variant/70 bg-black/45 px-1 py-0.5 rounded tracking-wide uppercase scale-90">
+                          <span 
+                            className="font-mono text-on-surface-variant/70 bg-black/45 px-1 py-0.5 rounded tracking-wide uppercase scale-90"
+                            style={{ fontSize: `${Math.max(7.5, Math.min(12, trackHeight * 0.18))}px` }}
+                          >
                             {clip.type === 'video' ? 'V1' : clip.type === 'audio' ? 'A1' : clip.type === 'text' ? 'T1' : 'FX'}
                           </span>
                         </div>

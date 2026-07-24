@@ -26,6 +26,7 @@ interface InspectorProps {
   onCaptionTextEdit?: (captionId: number, newText: string) => void;
   currentTime?: number;
   onUpdateClip?: (clipId: string, updatedFields: Partial<Clip>) => void;
+  width?: number;
 }
 
 export default function Inspector({
@@ -44,6 +45,7 @@ export default function Inspector({
   onCaptionTextEdit,
   currentTime,
   onUpdateClip,
+  width = 320,
 }: InspectorProps) {
   const handleResetTransform = () => {
     onUpdateTransform({
@@ -56,7 +58,10 @@ export default function Inspector({
   };
 
   return (
-    <aside className="w-80 shrink-0 bg-surface border border-white/[0.06] rounded-2xl flex flex-col overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)] select-none">
+    <aside 
+      className="shrink-0 bg-surface border border-white/[0.06] rounded-2xl flex flex-col overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)] select-none transition-none"
+      style={{ width: `${width}px` }}
+    >
       {/* Tab bar header */}
       <div className="flex border-b border-white/[0.04] bg-surface-container-lowest shrink-0">
         {(['video', 'audio', 'effects', 'text'] as InspectorTab[]).map((tab) => (

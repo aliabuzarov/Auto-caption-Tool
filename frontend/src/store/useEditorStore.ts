@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Clip, Caption, CaptionChunk, Track } from '../types';
+import { Clip, Caption, CaptionChunk, Track, SidebarTab, InspectorTab } from '../types';
 import { MediaItem, INITIAL_TRACKS } from '../data';
 
 interface TransformState {
@@ -32,10 +32,10 @@ interface EditorState {
   // Navigation
   viewMode: 'dashboard' | 'editor';
   setViewMode: (mode: 'dashboard' | 'editor') => void;
-  activeTab: 'media' | 'import' | 'text' | 'effects' | 'export';
-  setActiveTab: (tab: 'media' | 'import' | 'text' | 'effects' | 'export') => void;
-  inspectorTab: 'video' | 'audio' | 'text' | 'effects' | 'export';
-  setInspectorTab: (tab: 'video' | 'audio' | 'text' | 'effects' | 'export') => void;
+  activeTab: SidebarTab;
+  setActiveTab: (tab: SidebarTab) => void;
+  inspectorTab: InspectorTab;
+  setInspectorTab: (tab: InspectorTab) => void;
 
   // Media & Clips
   mediaList: MediaItem[];
@@ -86,12 +86,18 @@ interface EditorState {
   setJobStatus: (status: string | null) => void;
   wordsPerLine: number;
   setWordsPerLine: (words: number) => void;
-  activeCaptions: Caption[];
-  setActiveCaptions: (updater: Caption[] | ((prev: Caption[]) => Caption[])) => void;
+  activeCaptions: CaptionChunk[];
+  setActiveCaptions: (updater: CaptionChunk[] | ((prev: CaptionChunk[]) => CaptionChunk[])) => void;
   editingCaptions: CaptionChunk[] | null;
   setEditingCaptions: (updater: CaptionChunk[] | null | ((prev: CaptionChunk[] | null) => CaptionChunk[] | null)) => void;
   captionOffset: { x: number; y: number };
   setCaptionOffset: (updater: { x: number; y: number } | ((prev: { x: number; y: number }) => { x: number; y: number })) => void;
+  captionStyle: import('../types').CaptionStyle;
+  setCaptionStyle: (updater: import('../types').CaptionStyle | ((prev: import('../types').CaptionStyle) => import('../types').CaptionStyle)) => void;
+  editToken?: string;
+  setEditToken: (token?: string) => void;
+  previewDimensions: { width: number; height: number };
+  setPreviewDimensions: (dim: { width: number; height: number }) => void;
 
   // Export / Video file
   userVideoFile: File | null;
@@ -114,8 +120,8 @@ interface EditorState {
   setExportQuality: (q: string) => void;
 
   // History (Undo/Redo)
-  past: { clips: Clip[]; transform: TransformState }[];
-  future: { clips: Clip[]; transform: TransformState }[];
+  past: { clips: Clip[]; transform: TransformState; editingCaptions: CaptionChunk[] | null }[];
+  future: { clips: Clip[]; transform: TransformState; editingCaptions: CaptionChunk[] | null }[];
   saveHistory: () => void;
   undo: () => void;
   redo: () => void;
@@ -192,6 +198,18 @@ export const useEditorStore = create<EditorState>((set) => ({
   setEditingCaptions: (updater) => set((state) => ({ editingCaptions: typeof updater === 'function' ? updater(state.editingCaptions) : updater })),
   captionOffset: { x: 0, y: 0 },
   setCaptionOffset: (updater) => set((state) => ({ captionOffset: typeof updater === 'function' ? updater(state.captionOffset) : updater })),
+  captionStyle: {
+    fontFamily: 'Arial',
+    fontSizeScale: 100,
+    primaryColor: '#FFFFFF',
+    highlightColor: '#FFFF00',
+    bgOpacity: 85,
+  },
+  setCaptionStyle: (updater) => set((state) => ({ captionStyle: typeof updater === 'function' ? updater(state.captionStyle) : updater })),
+  editToken: undefined,
+  setEditToken: (token) => set({ editToken: token }),
+  previewDimensions: { width: 0, height: 0 },
+  setPreviewDimensions: (dim) => set({ previewDimensions: dim }),
 
   // Export / Video file
   userVideoFile: null,
@@ -229,7 +247,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   future: [],
   saveHistory: () =>
     set((state) => ({
-      past: [...state.past, { clips: state.clips, transform: state.transform }],
+      past: [...state.past, { clips: state.clips, transform: state.transform, editingCaptions: state.editingCaptions }],
       future: [],
     })),
   undo: () =>
@@ -239,9 +257,10 @@ export const useEditorStore = create<EditorState>((set) => ({
       const newPast = state.past.slice(0, state.past.length - 1);
       return {
         past: newPast,
-        future: [{ clips: state.clips, transform: state.transform }, ...state.future],
+        future: [{ clips: state.clips, transform: state.transform, editingCaptions: state.editingCaptions }, ...state.future],
         clips: previous.clips,
         transform: previous.transform,
+        editingCaptions: previous.editingCaptions,
       };
     }),
   redo: () =>
@@ -250,10 +269,11 @@ export const useEditorStore = create<EditorState>((set) => ({
       const next = state.future[0];
       const newFuture = state.future.slice(1);
       return {
-        past: [...state.past, { clips: state.clips, transform: state.transform }],
+        past: [...state.past, { clips: state.clips, transform: state.transform, editingCaptions: state.editingCaptions }],
         future: newFuture,
         clips: next.clips,
         transform: next.transform,
+        editingCaptions: next.editingCaptions,
       };
     }),
 }));

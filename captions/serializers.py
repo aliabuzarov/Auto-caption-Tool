@@ -16,6 +16,9 @@ class JobListSerializer(serializers.ModelSerializer):
             "error_message",
             "created_at",
             "updated_at",
+            "caption_style",
+            "caption_offset",
+            "edit_token",
         ]
 
 
@@ -36,6 +39,9 @@ class CaptionJobSerializer(serializers.ModelSerializer):
             "error_message",
             "created_at",
             "updated_at",
+            "caption_style",
+            "caption_offset",
+            "edit_token",
         ]
         read_only_fields = [
             "id",
@@ -45,6 +51,7 @@ class CaptionJobSerializer(serializers.ModelSerializer):
             "error_message",
             "created_at",
             "updated_at",
+            "edit_token",
         ]
 
 

@@ -1,0 +1,108 @@
+# AutoCaption Tool: Exhaustive Technical Specification & Description
+
+## 1. Executive Summary & Vision
+AutoCaption Tool is a full-stack, professional-grade web application designed for modern video creators to automate, edit, and burn karaoke-style captions into video content. 
+
+Historically, web-based video editors suffer from bloated "web-first" UI paradigms (too much padding, lack of keyboard shortcuts, laggy playback). AutoCaption breaks this mold by adopting a **High-Density, Non-Linear Editor (NLE) aesthetic** akin to industry standards like Adobe Premiere Pro, Final Cut, and DaVinci Resolve. The application focuses on pixel-perfect precision, fully resizable modular panels, and robust local execution to protect user privacy and avoid recurring cloud API costs.
+
+---
+
+## 2. Comprehensive Feature Matrix
+* **100% Local AI Transcription:** Uses open-source `faster-whisper` for offline, highly accurate voice-to-text generation.
+* **Word-Level Timing:** Extracts specific start and end times for every single word spoken to allow for "karaoke-style" highlights.
+* **Professional NLE Timeline:** 
+  * Unrestricted horizontal zooming (from 50% to 2000%).
+  * Independent vertical track scaling for maximum readability.
+  * Snap-to-grid mechanics (5-second intervals).
+  * Seamless synchronized scrolling between track headers and the main timeline canvas.
+* **WYSIWYG Preview Canvas:**
+  * Real-time caption rendering synced to the video playhead.
+  * Aspect-ratio-aware video containment.
+  * Draggable transform boundaries (Scale, Rotate, Translate video X/Y).
+  * Platform-specific "Safe Zones" (e.g., TikTok, Instagram Reels) to prevent captions from being covered by native app UI.
+* **Deep Customization (Inspector):**
+  * Change typography (Font family, weight, size, tracking, leading).
+  * Adjust colors (Primary text color, spoken highlight color, background boxes, shadows).
+  * Apply video LUTs (Color grading profiles like Cyberpunk, VHS, Cinematic Noir).
+* **Hardware-Accelerated Rendering:** FFmpeg-powered backend rendering that burns text and transformations directly into a finalized MP4.
+* **Containerized Infrastructure:** Fully dockerized stack (PostgreSQL, Redis, Django, Celery, Vite) for instantaneous one-command setup.
+
+---
+
+## 3. Frontend Architecture (Deep Dive)
+
+The frontend is a thick-client Single Page Application (SPA) built with **React 18** and **Vite**.
+
+### 3.1 State Management (Zustand)
+Given the immense complexity of syncing a video player, a zoomable timeline, and real-time caption overlays, React's Context API would cause fatal re-rendering performance issues. We rely on `zustand` (`useEditorStore`) to maintain a global, atomic state. 
+* **State Trees:** Tracks `activeMedia`, `currentTime`, `duration`, `captionChunks`, `zoomLevel`, `jobStatus`, and UI states like `viewMode`.
+* **Performance:** Components only subscribe to the specific slices of state they need, ensuring the Timeline doesn't re-render just because a user changes a color in the Inspector.
+
+### 3.2 Layout & UI Paradigms
+* **TailwindCSS:** Extensively utilized for all styling. The color palette revolves around custom hex codes (`surface-container-lowest`, `background-dark`, `primary`, `secondary`) designed specifically to reduce eye strain for video editors working in dark environments.
+* **Dynamic Resizing Panels:** The UI is wrapped in a completely responsive Flexbox architecture. Custom `<div className="cursor-col-resize" />` elements allow the user to click and drag the boundaries between the Sidebar, the middle Canvas/Timeline section, and the right Inspector, redistributing the `flex-basis` dynamically.
+
+### 3.3 Core Components
+
+#### A. `App.tsx` & Layout Shell
+Acts as the router and layout engine. It conditionally renders the `Dashboard` (project selection) or the main Editor workspace. It listens to window resize events and maintains the drag-to-resize panel states.
+
+#### B. `Timeline.tsx`
+The most mathematically complex component in the app.
+* **Time-to-Pixel Mapping:** It converts `currentTime` (seconds) into percentages or exact pixel widths based on the active `zoom` state.
+* **Event Handling:** Utilizes `onWheel` to capture trackpad scrolling. It distinguishes between vertical mouse wheels (for zooming) and horizontal trackpad swipes (for panning).
+* **Tick Ruler:** Dynamically generates `tickMarks` (time intervals) based on the zoom level and total duration, rendering a ruler at the top of the timeline for scrubbing.
+
+#### C. `PreviewCanvas.tsx`
+* **Video Wrapper:** Utilizes an HTML5 `<video>` element, strictly controlled by React refs to seek and play/pause programmatically without showing native browser controls.
+* **Caption Engine:** Iterates over the AI-generated caption chunks. It checks if `currentTime >= word.start && currentTime <= word.end` to apply active highlight colors in real time.
+* **Transform Engine:** Renders an absolute-positioned bounding box around the video. Users can click handles to manipulate a `transform` state object `{ scale, rotate, x, y }`, which is applied via inline CSS `transform` properties.
+
+#### D. `Sidebar.tsx` & `Inspector.tsx`
+* **Sidebar:** Features a dense vertical icon strip for navigation (Import, Media, Text, Effects, AI).
+* **Inspector:** A context-sensitive property panel. If a user selects a caption clip on the timeline, the Inspector morphs to show typography controls. If they click the video, it shows LUT and opacity controls.
+
+---
+
+## 4. Backend Architecture (Deep Dive)
+
+The backend operates as an asynchronous job orchestrator built on **Django (Python)** and **Django REST Framework (DRF)**.
+
+### 4.1 Database & Models
+* Uses **PostgreSQL** (via Docker) to store persistent data.
+* **Job Model:** Tracks the lifecycle of a video (`UUID`, `status`, `original_video_path`, `rendered_video_path`, `caption_data` as a JSON blob). 
+
+### 4.2 Celery & Redis Task Queue
+Video processing cannot be handled synchronously in an HTTP request.
+* **Redis** acts as the message broker.
+* When a user uploads a video to `/api/jobs/`, Django creates a `Job` record in the database, marks it `PENDING`, and dispatches a Celery task `process_video_task.delay(job.id)`. 
+* The frontend immediately receives the `Job ID` and begins long-polling `/api/jobs/<uuid>/` every 2 seconds to update the UI progress bar.
+
+### 4.3 AI Transcription Pipeline (`faster-whisper`)
+* The Celery worker runs `faster-whisper`.
+* **Audio Extraction:** It first uses FFmpeg to strip the audio track from the uploaded video (speeding up transcription).
+* **Transcription & Chunking:** The Whisper model transcribes the audio, explicitly instructed to return word-level timestamps.
+* **Data Structuring:** The backend groups these words into logical "chunks" or sentences based on punctuation and pauses, generating a massive JSON payload detailing every single word, its start time, end time, and text string.
+
+### 4.4 Hardware Rendering Pipeline (FFmpeg)
+* When the user hits "Export," the frontend sends the finalized JSON payload (which now includes user edits to text, colors, and timings) back to the server.
+* Django triggers a `render_video_task`.
+* **Subtitle Generation:** The Python backend dynamically generates an `.ass` (Advanced SubStation Alpha) or `.srt` subtitle file on the fly, calculating font sizes, hex colors, and precise millisecond timings based on the user's Inspector choices.
+* **Final Burn-in:** An FFmpeg subprocess is spawned:
+  `ffmpeg -i input.mp4 -vf "subtitles=temp.ass" -c:a copy output.mp4`
+* Once FFmpeg completes, the `Job` status changes to `COMPLETED`, and the frontend displays a Download button.
+
+---
+
+## 5. Infrastructure & Deployment Setup
+
+The entire repository is structured to be "Local-First," meaning a developer can pull it and run it immediately without setting up databases manually or configuring python environments.
+
+### `docker-compose.yml`
+Defines 4 distinct services:
+1. **`db`**: PostgreSQL 16 image, with a named volume `postgres_data` for persistence.
+2. **`redis`**: Redis 7 Alpine image, acting as the Celery broker.
+3. **`web`**: The Django application. It maps the local codebase as a volume (for live reloading) and automatically runs `python manage.py migrate` and `runserver` on boot.
+4. **`worker`**: The Celery worker container. It shares the exact same codebase and media volume as `web`, allowing it to read the files Django saves and process them through Whisper/FFmpeg.
+
+*(Note: The React frontend is currently designed to be run locally via `npm run dev` outside of docker for maximum Vite Hot-Module-Replacement speed, though it can easily be bundled into an Nginx container for production deployment.)*

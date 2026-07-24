@@ -44,6 +44,8 @@ import {
   downloadVideo,
   mediaUrl,
   regenerateJob,
+  updateSettings,
+  cancelJob,
 } from './api';
 
 import Header from './components/Header';
@@ -74,10 +76,14 @@ export default function App() {
     exportResolution, setExportResolution, exportQuality, setExportQuality,
     exportProgress, setExportProgress, isExported, setIsExported,
     downloadUrl, setDownloadUrl, toasts, showToast,
-    saveHistory, undo, redo
+    saveHistory, undo, redo, captionStyle,
+    editToken, setEditToken, previewDimensions
   } = useEditorStore();
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const [leftPanelWidth, setLeftPanelWidth] = useState<number>(320);
+  const [rightPanelWidth, setRightPanelWidth] = useState<number>(320);
+  const [timelineHeight, setTimelineHeight] = useState<number>(256);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const exportPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -88,6 +94,16 @@ export default function App() {
       if (exportPollTimerRef.current) clearInterval(exportPollTimerRef.current);
     };
   }, []);
+
+  // Autosave settings
+  useEffect(() => {
+    if (!jobId || !editToken || jobStatus === 'transcribing') return;
+
+    const timeout = setTimeout(() => {
+      updateSettings(jobId, editingCaptions || undefined, captionOffset, captionStyle, editToken).catch(console.error);
+    }, 1500);
+    return () => clearTimeout(timeout);
+  }, [jobId, editToken, editingCaptions, captionOffset, captionStyle, jobStatus]);
 
   // --- WORKSPACE HANDLERS ---
   const handleTogglePlay = useCallback(() => {
@@ -238,6 +254,7 @@ export default function App() {
     setEditingCaptions(null);
     setJobId(null);
     setJobStatus(null);
+    setEditToken(undefined);
     showToast(`Video "${file.name}" loaded for captioning`);
   }, [showToast]);
 
@@ -282,7 +299,7 @@ export default function App() {
 
       if (jobId && hasCaptions) {
         // Regenerate existing job
-        await regenerateJob(jobId, wordsPerLine, 'small');
+        await regenerateJob(jobId, wordsPerLine, 'small', editToken);
       } else if (userVideoFile) {
         // Create new job
         setUploadProgress(0);
@@ -297,6 +314,7 @@ export default function App() {
         currentJobId = job.id;
         setJobId(job.id);
         setJobStatus(job.status as JobStatus);
+        setEditToken(job.edit_token);
       }
 
       if (!currentJobId) {
@@ -318,18 +336,11 @@ export default function App() {
             const chunks: CaptionChunk[] = currentJob.caption_data || [];
             setEditingCaptions(chunks);
 
-            // Convert to the Caption format the UI uses
-            const captions: Caption[] = chunks.map((c) => ({
-              id: String(c.id),
-              start: c.start,
-              end: c.end,
-              text: c.text,
-            }));
-            setActiveCaptions(captions);
+            setActiveCaptions(chunks);
             setHasCaptions(true);
 
             // Populate timeline clips for text track
-            const textClips: Clip[] = captions.map((c) => ({
+            const textClips: Clip[] = chunks.map((c) => ({
               id: `text-${c.id}`,
               trackId: 'text',
               title: c.text,
@@ -378,7 +389,24 @@ export default function App() {
       setIsGeneratingCaptions(false);
       showToast(e.message || 'Failed to generate captions');
     }
-  }, [isGeneratingCaptions, userVideoFile, showToast, setActiveTab, wordsPerLine]);
+  }, [isGeneratingCaptions, userVideoFile, showToast, setActiveTab, wordsPerLine, jobId, hasCaptions, editToken, uploadProgress]);
+
+  const handleCancelAICaptions = useCallback(async () => {
+    if (!jobId || !editToken) return;
+    try {
+      await cancelJob(jobId, editToken);
+      setIsGeneratingCaptions(false);
+      setUploadProgress(null);
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+      setJobStatus('failed');
+      showToast('Transcription cancelled.');
+    } catch (err: any) {
+      showToast('Failed to cancel transcription: ' + err.message);
+    }
+  }, [jobId, editToken, showToast]);
 
   // =====================================================================
   const handleCaptionTextEdit = useCallback((captionId: number, newText: string) => {
@@ -388,7 +416,7 @@ export default function App() {
         : null,
     );
     setActiveCaptions((prev) =>
-      prev.map((c) => (c.id === String(captionId) ? { ...c, text: newText } : c)),
+      prev.map((c) => (c.id === captionId ? { ...c, text: newText } : c)),
     );
     setClips((prev) =>
       prev.map((c) => (c.id === `text-${captionId}` ? { ...c, text: newText, title: newText, isAICaption: true } : c))
@@ -402,7 +430,7 @@ export default function App() {
         : null,
     );
     setActiveCaptions((prev) =>
-      prev.map((c) => (c.id === String(captionId) ? { ...c, start, end } : c)),
+      prev.map((c) => (c.id === captionId ? { ...c, start, end } : c)),
     );
     setClips((prev) =>
       prev.map((c) => (c.id === `text-${captionId}` ? { ...c, start, duration: end - start, isAICaption: true } : c))
@@ -430,10 +458,10 @@ export default function App() {
     try {
       // Step 1: Save edited captions
       setExportProgress(20);
-      await updateCaptions(jobId, editingCaptions);
+      await updateCaptions(jobId, editingCaptions, editToken);
 
       // Step 2: Trigger render
-      await renderJob(jobId, captionOffset, { resolution: exportResolution, quality: exportQuality });
+      await renderJob(jobId, previewDimensions, captionOffset, { resolution: exportResolution, quality: exportQuality }, captionStyle, editToken);
       setJobStatus('rendering');
 
       // Step 3: Poll for render completion
@@ -512,13 +540,15 @@ export default function App() {
       const job = await getJob(projectId);
       setJobId(job.id);
       setJobStatus(job.status as JobStatus);
+      if (job.edit_token) {
+        setEditToken(job.edit_token);
+      }
       if (job.caption_data) {
         setEditingCaptions(job.caption_data);
-        const mappedCaptions = job.caption_data.map((c) => ({ id: String(c.id), start: c.start, end: c.end, text: c.text }));
-        setActiveCaptions(mappedCaptions);
+        setActiveCaptions(job.caption_data);
         setHasCaptions(true);
 
-        const textClips: Clip[] = mappedCaptions.map((c) => ({
+        const textClips: Clip[] = job.caption_data.map((c) => ({
           id: `text-${c.id}`,
           trackId: 'text',
           title: c.text,
@@ -567,11 +597,70 @@ export default function App() {
     setViewMode('editor');
   };
 
+  const handleLeftResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = leftPanelWidth;
+    
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const newWidth = Math.max(240, Math.min(800, startWidth + (moveEvent.clientX - startX)));
+      setLeftPanelWidth(newWidth);
+    };
+    
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleRightResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = rightPanelWidth;
+    
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const newWidth = Math.max(240, Math.min(800, startWidth - (moveEvent.clientX - startX)));
+      setRightPanelWidth(newWidth);
+    };
+    
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleTimelineResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = timelineHeight;
+    
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      // Moving mouse up (negative delta) means larger timeline height
+      const maxHeight = typeof window !== 'undefined' ? window.innerHeight - 350 : 800;
+      const newHeight = Math.max(150, Math.min(maxHeight, startHeight - (moveEvent.clientY - startY)));
+      setTimelineHeight(newHeight);
+    };
+    
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
   // =====================================================================
   // RENDER
   // =====================================================================
   return (
-    <div className="h-screen w-screen flex flex-col p-6 gap-5 bg-background-dark text-on-surface antialiased overflow-hidden select-none font-sans relative">
+    <div className="h-screen w-screen flex flex-col p-2 gap-2 bg-background-dark text-on-surface antialiased overflow-hidden select-none font-sans relative">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(173,198,255,0.035)_0%,_transparent_65%)] pointer-events-none z-0"></div>
 
       {viewMode === 'dashboard' ? (
@@ -583,8 +672,9 @@ export default function App() {
         <>
           <Header onExport={() => setShowExportModal(true)} onBackToDashboard={() => setViewMode('dashboard')} />
 
-      <main className="flex-1 flex gap-5 min-h-0 z-10 w-full max-w-7xl mx-auto">
+      <main className="flex-1 flex gap-2 min-h-0 z-10 w-full max-w-[1920px] mx-auto">
         <Sidebar
+          width={leftPanelWidth}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           mediaList={mediaList}
@@ -595,6 +685,7 @@ export default function App() {
           onSelectLUT={handleSelectLUT}
           activeLUT={effects.lut}
           onRunAICaptions={handleRunAICaptions}
+          onCancelAICaptions={handleCancelAICaptions}
           isGeneratingCaptions={isGeneratingCaptions}
           hasCaptions={hasCaptions}
           onImportFile={handleImportFile}
@@ -604,7 +695,12 @@ export default function App() {
           setWordsPerLine={setWordsPerLine}
         />
 
-        <div className="flex-1 flex flex-col gap-5 min-w-0">
+        <div 
+          className="w-2 shrink-0 bg-transparent hover:bg-white/10 active:bg-primary/30 cursor-col-resize transition-colors rounded-full" 
+          onMouseDown={handleLeftResize}
+        />
+
+        <div className="flex-1 flex flex-col min-w-[400px] min-h-0">
           <PreviewCanvas
             activeMedia={activeMedia}
             isPlaying={isPlaying}
@@ -630,26 +726,46 @@ export default function App() {
             clips={clips}
           />
 
-          <Timeline
-            tracks={tracks}
-            onToggleTrack={handleToggleTrack}
-            clips={clips}
-            selectedClipId={selectedClipId}
-            onSelectClip={handleSelectClip}
-            currentTime={currentTime}
-            onSeek={handleSeek}
-            onUpdateClip={handleUpdateClip}
-            zoom={zoom}
-            setZoom={setZoom}
-            markers={markers}
-            snapToGrid={snapToGrid}
-            onToggleSnap={() => setSnapToGrid(!snapToGrid)}
-            onDeleteClip={handleDeleteClip}
-            totalDuration={videoDuration}
+          <div 
+            className="h-2 shrink-0 bg-transparent hover:bg-white/10 active:bg-primary/30 cursor-row-resize transition-colors rounded-full my-1.5" 
+            onMouseDown={handleTimelineResize}
           />
+
+          <div 
+            className="shrink-0 flex flex-col relative transition-none"
+            style={{ 
+              height: `${timelineHeight}px`, 
+              maxHeight: '60%',
+              minHeight: '150px'
+            }}
+          >
+            <Timeline
+              tracks={tracks}
+              onToggleTrack={handleToggleTrack}
+              clips={clips}
+              selectedClipId={selectedClipId}
+              onSelectClip={handleSelectClip}
+              currentTime={currentTime}
+              onSeek={handleSeek}
+              onUpdateClip={handleUpdateClip}
+              zoom={zoom}
+              setZoom={setZoom}
+              markers={markers}
+              snapToGrid={snapToGrid}
+              onToggleSnap={() => setSnapToGrid(!snapToGrid)}
+              onDeleteClip={handleDeleteClip}
+              totalDuration={videoDuration}
+            />
+          </div>
         </div>
 
+        <div 
+          className="w-2 shrink-0 bg-transparent hover:bg-white/10 active:bg-primary/30 cursor-col-resize transition-colors rounded-full" 
+          onMouseDown={handleRightResize}
+        />
+
         <Inspector
+          width={rightPanelWidth}
           activeTab={inspectorTab}
           setActiveTab={setInspectorTab}
           selectedClip={selectedClip}

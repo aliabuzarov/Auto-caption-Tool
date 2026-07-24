@@ -5,10 +5,13 @@ API views for the AutoCaption application.
 POST   /api/jobs/               – upload video, create job, dispatch transcription
 GET    /api/jobs/<id>/           – poll job status & retrieve caption_data
 PATCH  /api/jobs/<id>/captions/  – save user-edited caption_data
+PATCH  /api/jobs/<id>/settings/  – autosave style, offset, and data
 POST   /api/jobs/<id>/render/    – trigger rendering
 GET    /api/jobs/<id>/download/  – serve the finished output_video
+POST   /api/jobs/<id>/cancel/    – cancel a pending/transcribing job
 """
 
+import secrets
 from django.http import FileResponse, Http404
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
@@ -19,6 +22,11 @@ from .models import CaptionJob
 from .serializers import CaptionDataSerializer, CaptionJobSerializer, JobListSerializer
 from .tasks import render_video, transcribe_video
 
+def check_edit_token(job, request):
+    token = request.headers.get("X-Edit-Token")
+    if job.edit_token and token != job.edit_token:
+        return False
+    return True
 
 @api_view(["GET", "POST"])
 @csrf_exempt
@@ -51,6 +59,10 @@ def create_job(request):
 
     job = serializer.save()
 
+    # Generate a secure edit token for this job
+    job.edit_token = secrets.token_urlsafe(32)
+    job.save(update_fields=["edit_token"])
+
     if not job.name or job.name == "Untitled Project":
         job.name = video_file.name if video_file else "Untitled Project"
         job.save(update_fields=["name"])
@@ -76,7 +88,7 @@ def create_job(request):
     transcribe_video.delay(str(job.id))
 
     return Response(
-        {"id": str(job.id), "status": job.status},
+        {"id": str(job.id), "status": job.status, "edit_token": job.edit_token},
         status=status.HTTP_201_CREATED,
     )
 
@@ -94,6 +106,10 @@ def get_job(request, pk):
     except CaptionJob.DoesNotExist:
         raise Http404("CaptionJob not found.")
 
+    if request.method in ["DELETE", "PATCH"]:
+        if not check_edit_token(job, request):
+            return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+
     if request.method == "DELETE":
         job.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -110,21 +126,58 @@ def get_job(request, pk):
 
 @api_view(["PATCH"])
 @csrf_exempt
-def update_captions(request, pk):
+def update_settings(request, pk):
     """
-    Save user-edited caption_data to an existing CaptionJob.
-
-    Only the 'text' field of each entry is expected to be changed;
-    start/end timestamps must match the original transcription and are validated.
+    Autosave caption_style, caption_offset, and caption_data.
     """
     try:
         job = CaptionJob.objects.get(pk=pk)
     except CaptionJob.DoesNotExist:
         raise Http404("CaptionJob not found.")
 
-    if job.status != CaptionJob.Status.READY_FOR_REVIEW:
+    if not check_edit_token(job, request):
+        return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    caption_style = request.data.get("caption_style")
+    caption_offset = request.data.get("caption_offset")
+    caption_data = request.data.get("caption_data")
+
+    update_fields = []
+    if caption_style is not None:
+        job.caption_style = caption_style
+        update_fields.append("caption_style")
+    if caption_offset is not None:
+        job.caption_offset = caption_offset
+        update_fields.append("caption_offset")
+    if caption_data is not None:
+        serializer = CaptionDataSerializer(data={"caption_data": caption_data})
+        if serializer.is_valid():
+            job.caption_data = serializer.validated_data["caption_data"]
+            update_fields.append("caption_data")
+
+    if update_fields:
+        job.save(update_fields=update_fields)
+
+    return Response({"status": "success"})
+
+
+@api_view(["PATCH"])
+@csrf_exempt
+def update_captions(request, pk):
+    """
+    Save user-edited caption_data to an existing CaptionJob.
+    """
+    try:
+        job = CaptionJob.objects.get(pk=pk)
+    except CaptionJob.DoesNotExist:
+        raise Http404("CaptionJob not found.")
+
+    if not check_edit_token(job, request):
+        return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if job.status not in [CaptionJob.Status.READY_FOR_REVIEW, CaptionJob.Status.DONE]:
         return Response(
-            {"detail": "Captions can only be updated while the job is in ready_for_review status."},
+            {"detail": "Captions can only be updated while the job is in ready_for_review or done status."},
             status=status.HTTP_409_CONFLICT,
         )
 
@@ -149,6 +202,9 @@ def regenerate_job(request, pk):
     except CaptionJob.DoesNotExist:
         raise Http404("CaptionJob not found.")
 
+    if not check_edit_token(job, request):
+        return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+
     words_per_line = request.data.get("words_per_line")
     whisper_model_size = request.data.get("whisper_model_size")
 
@@ -170,18 +226,18 @@ def regenerate_job(request, pk):
 def render_job(request, pk):
     """
     Trigger the render_video Celery task for a job whose captions are ready.
-
-    The job must be in ready_for_review status (caption_data already saved).
-    Sets status to rendering and dispatches the async task.
     """
     try:
         job = CaptionJob.objects.get(pk=pk)
     except CaptionJob.DoesNotExist:
         raise Http404("CaptionJob not found.")
 
-    if job.status != CaptionJob.Status.READY_FOR_REVIEW:
+    if not check_edit_token(job, request):
+        return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if job.status not in [CaptionJob.Status.READY_FOR_REVIEW, CaptionJob.Status.DONE]:
         return Response(
-            {"detail": "Render can only be triggered when job is in ready_for_review status."},
+            {"detail": "Render can only be triggered when job is in ready_for_review or done status."},
             status=status.HTTP_409_CONFLICT,
         )
 
@@ -195,21 +251,47 @@ def render_job(request, pk):
     job.save(update_fields=["status", "updated_at"])
 
     caption_offset = request.data.get("captionOffset", {})
+    offset_x = caption_offset.get("x", 0) if isinstance(caption_offset, dict) else 0
     offset_y = caption_offset.get("y", 0) if isinstance(caption_offset, dict) else 0
+    
+    preview_dim = request.data.get("previewDimensions", {})
+    preview_width = preview_dim.get("width", 0) if isinstance(preview_dim, dict) else 0
+    preview_height = preview_dim.get("height", 0) if isinstance(preview_dim, dict) else 0
 
     export_settings = request.data.get("exportSettings", {})
+    caption_style = request.data.get("captionStyle", {})
 
-    render_video.delay(str(job.id), int(offset_y), export_settings)
+    render_video.delay(str(job.id), int(offset_x), int(offset_y), int(preview_width), int(preview_height), export_settings, caption_style)
 
     return Response({"id": str(job.id), "status": job.status})
+
+
+@api_view(["POST"])
+@csrf_exempt
+def cancel_job(request, pk):
+    """
+    Cancel an ongoing transcription job.
+    """
+    try:
+        job = CaptionJob.objects.get(pk=pk)
+    except CaptionJob.DoesNotExist:
+        raise Http404("CaptionJob not found.")
+
+    if not check_edit_token(job, request):
+        return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+    if job.status in [CaptionJob.Status.PENDING, CaptionJob.Status.TRANSCRIBING]:
+        job.status = CaptionJob.Status.FAILED
+        job.error_message = "Cancelled by user"
+        job.save(update_fields=["status", "error_message"])
+    
+    return Response({"status": "cancelled"})
 
 
 @api_view(["GET"])
 def download_video(request, pk):
     """
     Serve the finished output_video file for download.
-
-    Only available when job.status == done and output_video exists.
     """
     try:
         job = CaptionJob.objects.get(pk=pk)
@@ -232,3 +314,4 @@ def download_video(request, pk):
         filename=f"captioned_{job.id}.mp4",
     )
     return response
+

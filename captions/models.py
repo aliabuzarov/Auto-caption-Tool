@@ -52,6 +52,9 @@ class CaptionJob(models.Model):
             "Whisper (word-grouped), editable by the user."
         ),
     )
+    caption_style = models.JSONField(null=True, blank=True)
+    caption_offset = models.JSONField(null=True, blank=True)
+    edit_token = models.CharField(max_length=64, blank=True)
     output_video = models.FileField(upload_to="output/", null=True, blank=True)
     error_message = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

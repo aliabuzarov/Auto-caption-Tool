@@ -37,6 +37,14 @@ export type SidebarTab = 'media' | 'import' | 'text' | 'audio' | 'effects' | 'ai
 
 export type InspectorTab = 'video' | 'audio' | 'effects' | 'text' | 'export';
 
+export interface CaptionStyle {
+  fontFamily: string;
+  fontSizeScale: number;
+  primaryColor: string;
+  highlightColor: string;
+  bgOpacity: number;
+}
+
 export interface VideoTransform {
   scale: number; // percentage (e.g. 124)
   x: number; // pixels offset
